@@ -1,0 +1,29 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+
+# Test / packaging artefacts
+.pytest_cache/
+*.egg-info/
+dist/
+
+# Secrets
+.env
+
+# Local data and indexes
+data/
+qdrant_storage/
+*.pkl
+
+# Frontend
+node_modules/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
