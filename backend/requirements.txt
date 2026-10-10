@@ -1,0 +1,7 @@
+gitpython
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+rich
+pytest
