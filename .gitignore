@@ -1,29 +1,29 @@
-# Python caches
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-
-# Test / packaging artefacts
-.pytest_cache/
-*.egg-info/
+# Build output & compiled classes
+target/
+*.class
+*.jar
+!**/.mvn/wrapper/*.jar
+out/
+build/
 dist/
 
-# Secrets
+# Environment and secrets
 .env
 
-# Local data and indexes
+# Local data & storage
 data/
 qdrant_storage/
-*.pkl
+logs/
+*.log
 
-# Frontend
+# Dependencies
 node_modules/
 
-# Editors / OS
-.vscode/
+# IDE & Editor files
 .idea/
+*.iml
+.vscode/
+
+# OS files
 .DS_Store
 Thumbs.db
