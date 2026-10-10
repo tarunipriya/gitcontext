@@ -47,6 +47,16 @@ class GitContextPropertiesTest {
 			assertThat(ingestion.codeExtensions()).contains("java", "py", "ts", "go", "rs", "cpp");
 			assertThat(ingestion.excludeLockFiles()).contains("package-lock.json", "yarn.lock", "poetry.lock");
 			assertThat(ingestion.excludeMinifiedPatterns()).contains("*.min.js", "*.min.css");
+
+			// GitHub defaults
+			GitContextProperties.GitHubProperties github = props.github();
+			assertThat(github).isNotNull();
+			assertThat(github.apiBaseUrl()).isEqualTo("https://api.github.com");
+			assertThat(github.maxPullRequests()).isEqualTo(200);
+			assertThat(github.maxIssues()).isEqualTo(200);
+			assertThat(github.maxCommentsPerItem()).isEqualTo(50);
+			assertThat(github.incidentLabels()).containsExactly("incident", "bug", "postmortem", "outage");
+			assertThat(github.rateLimitWarnThreshold()).isEqualTo(50);
 		});
 	}
 
@@ -60,7 +70,13 @@ class GitContextPropertiesTest {
 				"gitcontext.llm-api-key=sk_testKey67890",
 				"gitcontext.ingestion.max-file-size-kb=1024",
 				"gitcontext.ingestion.max-commits=100",
-				"gitcontext.ingestion.max-diff-chars=2000"
+				"gitcontext.ingestion.max-diff-chars=2000",
+				"gitcontext.github.api-base-url=https://github-enterprise.internal/api/v3",
+				"gitcontext.github.max-pull-requests=50",
+				"gitcontext.github.max-issues=75",
+				"gitcontext.github.max-comments-per-item=20",
+				"gitcontext.github.incident-labels=sev-1,incident,critical",
+				"gitcontext.github.rate-limit-warn-threshold=100"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -75,6 +91,13 @@ class GitContextPropertiesTest {
 			assertThat(props.ingestion().maxFileSizeKb()).isEqualTo(1024);
 			assertThat(props.ingestion().maxCommits()).isEqualTo(100);
 			assertThat(props.ingestion().maxDiffChars()).isEqualTo(2000);
+
+			assertThat(props.github().apiBaseUrl()).isEqualTo("https://github-enterprise.internal/api/v3");
+			assertThat(props.github().maxPullRequests()).isEqualTo(50);
+			assertThat(props.github().maxIssues()).isEqualTo(75);
+			assertThat(props.github().maxCommentsPerItem()).isEqualTo(20);
+			assertThat(props.github().incidentLabels()).containsExactly("sev-1", "incident", "critical");
+			assertThat(props.github().rateLimitWarnThreshold()).isEqualTo(100);
 		});
 	}
 
@@ -96,6 +119,7 @@ class GitContextPropertiesTest {
 				Path.of("./data/repos"),
 				"http://localhost:6333",
 				"sk_superSecretLlmKey",
+				null,
 				null
 		);
 
@@ -110,6 +134,7 @@ class GitContextPropertiesTest {
 				Path.of("./data/repos"),
 				"http://localhost:6333",
 				"",
+				null,
 				null
 		);
 

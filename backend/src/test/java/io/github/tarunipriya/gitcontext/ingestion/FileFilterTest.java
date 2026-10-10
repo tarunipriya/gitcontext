@@ -25,6 +25,7 @@ class FileFilterTest {
 				tempDir,
 				"http://localhost:6333",
 				null,
+				null,
 				null
 		);
 		fileFilter = new FileFilter(properties);
@@ -134,7 +135,8 @@ class FileFilterTest {
 						512, 500, 4000,
 						null, null, null, null,
 						java.util.List.of("*.bundle.js")
-				)
+				),
+				null
 		);
 		FileFilter customFilter = new FileFilter(propertiesWithCustomPattern);
 

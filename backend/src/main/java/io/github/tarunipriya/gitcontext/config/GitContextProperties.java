@@ -34,6 +34,7 @@ import org.springframework.validation.annotation.Validated;
  * @param qdrantUrl base URL for the Qdrant vector database instance (required, defaults to {@code http://localhost:6333})
  * @param llmApiKey API key for LLM provider access (optional)
  * @param ingestion ingestion configuration for cloning, filtering, and parsing repository content
+ * @param github GitHub REST API configuration for fetching pull requests and issues
  */
 @Validated
 @ConfigurationProperties(prefix = "gitcontext")
@@ -42,7 +43,8 @@ public record GitContextProperties(
 		@DefaultValue("./data/repos") Path reposDir,
 		@NotBlank @DefaultValue("http://localhost:6333") String qdrantUrl,
 		String llmApiKey,
-		@Valid @DefaultValue IngestionProperties ingestion
+		@Valid @DefaultValue IngestionProperties ingestion,
+		@Valid @DefaultValue GitHubProperties github
 ) {
 
 	/**
@@ -55,6 +57,9 @@ public record GitContextProperties(
 		}
 		if (ingestion == null) {
 			ingestion = new IngestionProperties(0, 0, 0, null, null, null, null, null);
+		}
+		if (github == null) {
+			github = new GitHubProperties(null, 0, 0, 0, null, -1);
 		}
 	}
 
@@ -150,6 +155,105 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for GitHub REST API client and ingestion under {@code gitcontext.github}.
+	 *
+	 * @param apiBaseUrl base URL for the GitHub REST API (default: https://api.github.com)
+	 * @param maxPullRequests maximum number of pull requests to ingest (default: 200)
+	 * @param maxIssues maximum number of issues to ingest (default: 200)
+	 * @param maxCommentsPerItem maximum number of comments to fetch per issue or pull request (default: 50)
+	 * @param incidentLabels label names that identify an incident or outage issue (default: incident, bug, postmortem, outage)
+	 * @param rateLimitWarnThreshold remaining rate limit threshold below which warning logs are emitted (default: 50)
+	 */
+	public record GitHubProperties(
+			@NotBlank @DefaultValue("https://api.github.com") String apiBaseUrl,
+			@Min(1) @DefaultValue("200") int maxPullRequests,
+			@Min(1) @DefaultValue("200") int maxIssues,
+			@Min(1) @DefaultValue("50") int maxCommentsPerItem,
+			@NotNull @DefaultValue({"incident", "bug", "postmortem", "outage"}) List<String> incidentLabels,
+			@Min(0) @DefaultValue("50") int rateLimitWarnThreshold
+	) {
+		private static final Map<String, List<String>> DEFAULT_LISTS = loadDefaultLists();
+		private static final String DEFAULT_API_BASE_URL = loadDefaultString("apiBaseUrl", "https://api.github.com");
+		private static final int DEFAULT_MAX_PULL_REQUESTS = loadDefaultInt("maxPullRequests", 200);
+		private static final int DEFAULT_MAX_ISSUES = loadDefaultInt("maxIssues", 200);
+		private static final int DEFAULT_MAX_COMMENTS_PER_ITEM = loadDefaultInt("maxCommentsPerItem", 50);
+		private static final int DEFAULT_RATE_LIMIT_WARN_THRESHOLD = loadDefaultInt("rateLimitWarnThreshold", 50);
+
+		public GitHubProperties {
+			if (apiBaseUrl == null || apiBaseUrl.isBlank()) {
+				apiBaseUrl = DEFAULT_API_BASE_URL;
+			}
+			if (maxPullRequests <= 0) {
+				maxPullRequests = DEFAULT_MAX_PULL_REQUESTS;
+			}
+			if (maxIssues <= 0) {
+				maxIssues = DEFAULT_MAX_ISSUES;
+			}
+			if (maxCommentsPerItem <= 0) {
+				maxCommentsPerItem = DEFAULT_MAX_COMMENTS_PER_ITEM;
+			}
+			if (rateLimitWarnThreshold < 0) {
+				rateLimitWarnThreshold = DEFAULT_RATE_LIMIT_WARN_THRESHOLD;
+			}
+			incidentLabels = incidentLabels != null ? List.copyOf(incidentLabels) : DEFAULT_LISTS.getOrDefault("incidentLabels", List.of());
+		}
+
+		private static Map<String, List<String>> loadDefaultLists() {
+			Map<String, List<String>> map = new HashMap<>();
+			for (RecordComponent rc : GitHubProperties.class.getRecordComponents()) {
+				if (List.class.isAssignableFrom(rc.getType())) {
+					DefaultValue dv = findDefaultValue(rc.getName());
+					if (dv != null) {
+						map.put(rc.getName(), List.of(dv.value()));
+					}
+				}
+			}
+			return Map.copyOf(map);
+		}
+
+		private static int loadDefaultInt(String propertyName, int fallback) {
+			DefaultValue dv = findDefaultValue(propertyName);
+			if (dv != null && dv.value().length > 0) {
+				try {
+					return Integer.parseInt(dv.value()[0]);
+				} catch (NumberFormatException ignored) {
+				}
+			}
+			return fallback;
+		}
+
+		private static String loadDefaultString(String propertyName, String fallback) {
+			DefaultValue dv = findDefaultValue(propertyName);
+			if (dv != null && dv.value().length > 0) {
+				return dv.value()[0];
+			}
+			return fallback;
+		}
+
+		private static DefaultValue findDefaultValue(String propertyName) {
+			try {
+				Field field = GitHubProperties.class.getDeclaredField(propertyName);
+				DefaultValue dv = field.getAnnotation(DefaultValue.class);
+				if (dv != null) {
+					return dv;
+				}
+			} catch (NoSuchFieldException ignored) {
+			}
+			for (Constructor<?> ctor : GitHubProperties.class.getDeclaredConstructors()) {
+				for (Parameter param : ctor.getParameters()) {
+					if (propertyName.equals(param.getName())) {
+						DefaultValue dv = param.getAnnotation(DefaultValue.class);
+						if (dv != null) {
+							return dv;
+						}
+					}
+				}
+			}
+			return null;
+		}
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -174,7 +278,8 @@ public record GitContextProperties(
 				"reposDir=" + reposDir + ", " +
 				"qdrantUrl=" + qdrantUrl + ", " +
 				"llmApiKey=" + maskSecret(llmApiKey) + ", " +
-				"ingestion=" + ingestion +
+				"ingestion=" + ingestion + ", " +
+				"github=" + github +
 				"]";
 	}
 

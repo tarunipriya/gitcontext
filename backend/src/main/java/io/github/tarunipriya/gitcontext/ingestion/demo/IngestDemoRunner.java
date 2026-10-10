@@ -4,6 +4,8 @@ import io.github.tarunipriya.gitcontext.ingestion.CommitIngestor;
 import io.github.tarunipriya.gitcontext.ingestion.FileIngestor;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
+import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
+import io.github.tarunipriya.gitcontext.ingestion.github.PullRequestIngestor;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
@@ -23,8 +25,8 @@ import org.springframework.stereotype.Component;
 /**
  * Demo runner active only when running with the {@code ingest-demo} Spring profile.
  *
- * <p>Clones or updates the configured demo repository, ingests its files and commits,
- * prints diagnostic summary statistics to the log, and exits.
+ * <p>Clones or updates the configured demo repository, ingests its files, commits,
+ * pull requests, and issues, prints diagnostic summary statistics to the log, and exits.
  */
 @Component
 @Profile("ingest-demo")
@@ -35,6 +37,8 @@ public class IngestDemoRunner implements CommandLineRunner {
 	private final RepositoryCloner repositoryCloner;
 	private final FileIngestor fileIngestor;
 	private final CommitIngestor commitIngestor;
+	private final PullRequestIngestor pullRequestIngestor;
+	private final IssueIngestor issueIngestor;
 	private final String demoRepoString;
 
 	/**
@@ -43,17 +47,23 @@ public class IngestDemoRunner implements CommandLineRunner {
 	 * @param repositoryCloner repository cloner
 	 * @param fileIngestor file ingestor
 	 * @param commitIngestor commit ingestor
+	 * @param pullRequestIngestor pull request ingestor
+	 * @param issueIngestor issue ingestor
 	 * @param demoRepoString repository reference string to ingest
 	 */
 	public IngestDemoRunner(
 			RepositoryCloner repositoryCloner,
 			FileIngestor fileIngestor,
 			CommitIngestor commitIngestor,
+			PullRequestIngestor pullRequestIngestor,
+			IssueIngestor issueIngestor,
 			@Value("${gitcontext.demo.repo}") String demoRepoString
 	) {
 		this.repositoryCloner = Objects.requireNonNull(repositoryCloner);
 		this.fileIngestor = Objects.requireNonNull(fileIngestor);
 		this.commitIngestor = Objects.requireNonNull(commitIngestor);
+		this.pullRequestIngestor = Objects.requireNonNull(pullRequestIngestor);
+		this.issueIngestor = Objects.requireNonNull(issueIngestor);
 		this.demoRepoString = Objects.requireNonNull(demoRepoString);
 	}
 
@@ -68,13 +78,24 @@ public class IngestDemoRunner implements CommandLineRunner {
 
 		List<Document> fileDocs = fileIngestor.ingest(clonedRepo);
 		List<Document> commitDocs = commitIngestor.ingest(clonedRepo);
+		List<Document> prDocs = pullRequestIngestor.ingest(repoRef);
+		List<Document> issueDocs = issueIngestor.ingest(repoRef);
 
-		List<Document> allDocs = new ArrayList<>(fileDocs.size() + commitDocs.size());
+		List<Document> allDocs = new ArrayList<>(fileDocs.size() + commitDocs.size() + prDocs.size() + issueDocs.size());
 		allDocs.addAll(fileDocs);
 		allDocs.addAll(commitDocs);
+		allDocs.addAll(prDocs);
+		allDocs.addAll(issueDocs);
+
+		long incidentIssueCount = issueDocs.stream()
+				.filter(doc -> "true".equals(doc.metadata().extra().get("incident")))
+				.count();
 
 		log.info("---------------- Ingestion Summary ----------------");
 		log.info("Total Documents Ingested: {}", allDocs.size());
+		log.info("PR Count: {}", prDocs.size());
+		log.info("Issue Count: {}", issueDocs.size());
+		log.info("Incident Issue Count: {}", incidentIssueCount);
 
 		// Counts by Source Type
 		Map<SourceType, Long> bySourceType = allDocs.stream()
@@ -105,6 +126,12 @@ public class IngestDemoRunner implements CommandLineRunner {
 		commitDocs.stream()
 				.limit(3)
 				.forEach(doc -> log.info("  - [{}] {}", doc.metadata().commitSha().substring(0, 7), doc.metadata().title()));
+
+		// 5 Most Recent Pull Requests
+		log.info("5 Most Recent Pull Requests:");
+		prDocs.stream()
+				.limit(5)
+				.forEach(doc -> log.info("  - PR #{}: {}", doc.metadata().prNumber(), doc.metadata().title()));
 
 		log.info("=================================================");
 		log.info("Ingestion Demo Finished Successfully.");
