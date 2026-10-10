@@ -1,0 +1,135 @@
+package io.github.tarunipriya.gitcontext.ingestion.github;
+
+import io.github.tarunipriya.gitcontext.config.GitContextProperties;
+import io.github.tarunipriya.gitcontext.model.Document;
+import io.github.tarunipriya.gitcontext.model.RepoRef;
+import io.github.tarunipriya.gitcontext.model.SourceType;
+import java.nio.file.Path;
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+
+class IssueIngestorTest {
+
+	private static final RepoRef REPO = new RepoRef("testowner", "testrepo");
+
+	@Test
+	@DisplayName("Skips pull request entries and sets incident flag correctly from labels")
+	void testSkipsPullRequestsAndClassifiesIncidentLabels() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = new GitContextProperties(
+				null,
+				Path.of("./data/repos"),
+				"http://localhost:6333",
+				null,
+				null,
+				null
+		);
+		GitHubClient client = new GitHubClient(builder, properties);
+		IssueIngestor ingestor = new IssueIngestor(client, properties);
+
+		String issuesJson = """
+				[
+					{
+						"number": 10,
+						"title": "PR disguised as issue",
+						"state": "open",
+						"body": "This is a pull request entry from GitHub issues API",
+						"pull_request": {"url": "https://api.github.com/repos/testowner/testrepo/pulls/10"}
+					},
+					{
+						"number": 11,
+						"title": "Database connection pool exhausted during peak traffic",
+						"state": "closed",
+						"body": "Outage occurred at 14:00 UTC due to connection exhaustion.",
+						"html_url": "https://github.com/testowner/testrepo/issues/11",
+						"created_at": "2026-10-05T14:00:00Z",
+						"user": {"login": "oncall_engineer"},
+						"labels": [
+							{"name": "BUG", "description": "Bug report"},
+							{"name": "backend", "description": "Backend service"}
+						]
+					},
+					{
+						"number": 12,
+						"title": "Add dark mode toggle to UI",
+						"state": "open",
+						"body": "User requested dark mode support.",
+						"html_url": "https://github.com/testowner/testrepo/issues/12",
+						"created_at": "2026-10-06T09:00:00Z",
+						"user": {"login": "frontend_dev"},
+						"labels": [
+							{"name": "enhancement", "description": "Feature request"}
+						]
+					}
+				]
+				""";
+
+		String comments11Json = """
+				[
+					{
+						"id": 501,
+						"body": "Resolved after increasing pool size from 10 to 50.",
+						"created_at": "2026-10-05T14:45:00Z",
+						"user": {"login": "dba_lead"}
+					}
+				]
+				""";
+
+		// 1. Fetch issues
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(issuesJson, MediaType.APPLICATION_JSON));
+
+		// 2. Fetch comments for issue 11
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/11/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(comments11Json, MediaType.APPLICATION_JSON));
+
+		// 3. Fetch comments for issue 12
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/12/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+
+		// Issue #10 was a pull request and must have been skipped
+		assertThat(documents).hasSize(2);
+
+		// Issue #11 (Incident issue due to "BUG" label matching default incidentLabels)
+		Document incidentDoc = documents.get(0);
+		assertThat(incidentDoc.metadata().sourceType()).isEqualTo(SourceType.ISSUE);
+		assertThat(incidentDoc.metadata().issueNumber()).isEqualTo(11);
+		assertThat(incidentDoc.metadata().title()).isEqualTo("Database connection pool exhausted during peak traffic");
+		assertThat(incidentDoc.metadata().author()).isEqualTo("oncall_engineer");
+		assertThat(incidentDoc.metadata().extra()).containsEntry("incident", "true");
+		assertThat(incidentDoc.metadata().extra()).containsEntry("labels", "BUG, backend");
+		assertThat(incidentDoc.metadata().extra()).containsEntry("state", "closed");
+		assertThat(incidentDoc.content()).contains("# Database connection pool exhausted during peak traffic");
+		assertThat(incidentDoc.content()).contains("State: closed");
+		assertThat(incidentDoc.content()).contains("Labels: BUG, backend");
+		assertThat(incidentDoc.content()).contains("## Discussion");
+		assertThat(incidentDoc.content()).contains("- dba_lead: Resolved after increasing pool size from 10 to 50.");
+
+		// Issue #12 (Normal non-incident issue)
+		Document normalDoc = documents.get(1);
+		assertThat(normalDoc.metadata().issueNumber()).isEqualTo(12);
+		assertThat(normalDoc.metadata().title()).isEqualTo("Add dark mode toggle to UI");
+		assertThat(normalDoc.metadata().extra()).containsEntry("incident", "false");
+		assertThat(normalDoc.metadata().extra()).containsEntry("labels", "enhancement");
+		assertThat(normalDoc.metadata().extra()).containsEntry("state", "open");
+	}
+}
