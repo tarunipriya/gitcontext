@@ -3,9 +3,14 @@ package io.github.tarunipriya.gitcontext.ingestion;
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -33,6 +38,7 @@ public class FileFilter {
 	private final Set<String> excludeDirsLower;
 	private final Set<String> excludeLockFilesLower;
 	private final Set<String> allowedExtensionsLower;
+	private final List<PathMatcher> minifiedPathMatchers;
 
 	/**
 	 * Creates a new {@link FileFilter} with configured ingestion rules.
@@ -60,6 +66,22 @@ public class FileFilter {
 		for (String ext : this.properties.docExtensions()) {
 			this.allowedExtensionsLower.add(ext.toLowerCase(Locale.ROOT));
 		}
+
+		FileSystem fs = FileSystems.getDefault();
+		List<PathMatcher> matchers = new ArrayList<>();
+		if (this.properties.excludeMinifiedPatterns() != null) {
+			for (String pattern : this.properties.excludeMinifiedPatterns()) {
+				if (pattern != null && !pattern.isBlank()) {
+					String trimmed = pattern.trim();
+					matchers.add(fs.getPathMatcher("glob:" + trimmed));
+					String lower = trimmed.toLowerCase(Locale.ROOT);
+					if (!lower.equals(trimmed)) {
+						matchers.add(fs.getPathMatcher("glob:" + lower));
+					}
+				}
+			}
+		}
+		this.minifiedPathMatchers = List.copyOf(matchers);
 	}
 
 	/**
@@ -97,8 +119,14 @@ public class FileFilter {
 		}
 
 		// 3. Check minified patterns
-		if (fileNameLower.endsWith(".min.js") || fileNameLower.endsWith(".min.css")) {
-			return false;
+		Path fileNamePath = Path.of(fileName);
+		Path fileNameLowerPath = Path.of(fileNameLower);
+		for (PathMatcher matcher : minifiedPathMatchers) {
+			if (matcher.matches(fileNamePath)
+					|| matcher.matches(fileNameLowerPath)
+					|| (relativePath != null && matcher.matches(relativePath))) {
+				return false;
+			}
 		}
 
 		// 4. Check allowed file extensions

@@ -7,6 +7,8 @@ import io.github.tarunipriya.gitcontext.model.DocumentMetadata;
 import io.github.tarunipriya.gitcontext.model.SourceType;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,7 +84,7 @@ public class CommitIngestor {
 					String title = commit.getShortMessage();
 					String fullMessage = commit.getFullMessage().trim();
 
-					ByteArrayOutputStream diffOut = new ByteArrayOutputStream();
+					SizeLimitedOutputStream diffOut = new SizeLimitedOutputStream(maxDiffChars);
 					List<String> filesChangedList = new ArrayList<>();
 
 					try (DiffFormatter diffFormatter = new DiffFormatter(diffOut)) {
@@ -119,12 +121,9 @@ public class CommitIngestor {
 
 					String diffString = diffOut.toString(StandardCharsets.UTF_8).trim();
 					if (!diffString.isEmpty()) {
-						contentBuilder.append("\n\n");
-						if (diffString.length() > maxDiffChars) {
-							contentBuilder.append(diffString, 0, maxDiffChars);
+						contentBuilder.append("\n\n").append(diffString);
+						if (diffOut.isTruncated()) {
 							contentBuilder.append("\n[diff truncated]");
-						} else {
-							contentBuilder.append(diffString);
 						}
 					}
 
@@ -156,5 +155,69 @@ public class CommitIngestor {
 
 		log.info("Ingested {} commit documents for repository {}", documents.size(), clonedRepo.repo().fullName());
 		return documents;
+	}
+
+	/**
+	 * An {@link OutputStream} that collects written bytes up to {@code maxBytes} in memory.
+	 * Any subsequent bytes written are discarded, and the {@code truncated} flag is set to {@code true}.
+	 */
+	static class SizeLimitedOutputStream extends OutputStream {
+
+		private final ByteArrayOutputStream buffer;
+		private final int maxBytes;
+		private boolean truncated;
+
+		/**
+		 * Creates a new {@link SizeLimitedOutputStream} with the given byte capacity.
+		 *
+		 * @param maxBytes maximum number of bytes to store in the internal buffer
+		 */
+		SizeLimitedOutputStream(int maxBytes) {
+			this.maxBytes = Math.max(0, maxBytes);
+			this.buffer = new ByteArrayOutputStream(Math.min(this.maxBytes, 8192));
+		}
+
+		@Override
+		public void write(int b) {
+			if (buffer.size() < maxBytes) {
+				buffer.write(b);
+			} else {
+				truncated = true;
+			}
+		}
+
+		@Override
+		public void write(byte[] b, int off, int len) {
+			Objects.checkFromIndexSize(off, len, b.length);
+			int remaining = maxBytes - buffer.size();
+			if (remaining > 0) {
+				int toWrite = Math.min(len, remaining);
+				buffer.write(b, off, toWrite);
+				if (toWrite < len) {
+					truncated = true;
+				}
+			} else if (len > 0) {
+				truncated = true;
+			}
+		}
+
+		/**
+		 * Returns {@code true} if additional bytes were passed to the stream beyond {@code maxBytes}.
+		 *
+		 * @return true if output was truncated
+		 */
+		public boolean isTruncated() {
+			return truncated;
+		}
+
+		/**
+		 * Decodes the buffered bytes into a {@link String} using the specified character set.
+		 *
+		 * @param charset character set for decoding
+		 * @return string representation of buffered bytes
+		 */
+		public String toString(Charset charset) {
+			return buffer.toString(charset);
+		}
 	}
 }

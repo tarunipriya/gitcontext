@@ -4,9 +4,15 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Parameter;
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
@@ -48,7 +54,7 @@ public record GitContextProperties(
 			qdrantUrl = "http://localhost:6333";
 		}
 		if (ingestion == null) {
-			ingestion = new IngestionProperties(512, 500, 4000, null, null, null, null, null);
+			ingestion = new IngestionProperties(0, 0, 0, null, null, null, null, null);
 		}
 	}
 
@@ -74,31 +80,72 @@ public record GitContextProperties(
 			@NotNull @DefaultValue({"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"}) List<String> excludeLockFiles,
 			@NotNull @DefaultValue({"*.min.js", "*.min.css"}) List<String> excludeMinifiedPatterns
 	) {
+		private static final Map<String, List<String>> DEFAULT_LISTS = loadDefaultLists();
+		private static final int DEFAULT_MAX_FILE_SIZE_KB = loadDefaultInt("maxFileSizeKb", 512);
+		private static final int DEFAULT_MAX_COMMITS = loadDefaultInt("maxCommits", 500);
+		private static final int DEFAULT_MAX_DIFF_CHARS = loadDefaultInt("maxDiffChars", 4000);
+
 		public IngestionProperties {
 			if (maxFileSizeKb <= 0) {
-				maxFileSizeKb = 512;
+				maxFileSizeKb = DEFAULT_MAX_FILE_SIZE_KB;
 			}
 			if (maxCommits <= 0) {
-				maxCommits = 500;
+				maxCommits = DEFAULT_MAX_COMMITS;
 			}
 			if (maxDiffChars <= 0) {
-				maxDiffChars = 4000;
+				maxDiffChars = DEFAULT_MAX_DIFF_CHARS;
 			}
-			excludeDirs = excludeDirs != null ? List.copyOf(excludeDirs) : List.of(
-					".git", "node_modules", "target", "build", "dist", "out", ".idea", ".vscode", ".venv", "venv", "__pycache__", ".gradle", ".mvn", "vendor", "coverage"
-			);
-			docExtensions = docExtensions != null ? List.copyOf(docExtensions) : List.of(
-					"md", "rst", "txt", "adoc"
-			);
-			codeExtensions = codeExtensions != null ? List.copyOf(codeExtensions) : List.of(
-					"java", "kt", "py", "js", "jsx", "ts", "tsx", "go", "rs", "c", "h", "cpp", "hpp", "cs", "rb", "php", "dart", "swift", "scala", "sql", "sh", "yml", "yaml", "toml", "json", "xml", "gradle"
-			);
-			excludeLockFiles = excludeLockFiles != null ? List.copyOf(excludeLockFiles) : List.of(
-					"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"
-			);
-			excludeMinifiedPatterns = excludeMinifiedPatterns != null ? List.copyOf(excludeMinifiedPatterns) : List.of(
-					"*.min.js", "*.min.css"
-			);
+			excludeDirs = excludeDirs != null ? List.copyOf(excludeDirs) : DEFAULT_LISTS.getOrDefault("excludeDirs", List.of());
+			docExtensions = docExtensions != null ? List.copyOf(docExtensions) : DEFAULT_LISTS.getOrDefault("docExtensions", List.of());
+			codeExtensions = codeExtensions != null ? List.copyOf(codeExtensions) : DEFAULT_LISTS.getOrDefault("codeExtensions", List.of());
+			excludeLockFiles = excludeLockFiles != null ? List.copyOf(excludeLockFiles) : DEFAULT_LISTS.getOrDefault("excludeLockFiles", List.of());
+			excludeMinifiedPatterns = excludeMinifiedPatterns != null ? List.copyOf(excludeMinifiedPatterns) : DEFAULT_LISTS.getOrDefault("excludeMinifiedPatterns", List.of());
+		}
+
+		private static Map<String, List<String>> loadDefaultLists() {
+			Map<String, List<String>> map = new HashMap<>();
+			for (RecordComponent rc : IngestionProperties.class.getRecordComponents()) {
+				if (List.class.isAssignableFrom(rc.getType())) {
+					DefaultValue dv = findDefaultValue(rc.getName());
+					if (dv != null) {
+						map.put(rc.getName(), List.of(dv.value()));
+					}
+				}
+			}
+			return Map.copyOf(map);
+		}
+
+		private static int loadDefaultInt(String propertyName, int fallback) {
+			DefaultValue dv = findDefaultValue(propertyName);
+			if (dv != null && dv.value().length > 0) {
+				try {
+					return Integer.parseInt(dv.value()[0]);
+				} catch (NumberFormatException ignored) {
+				}
+			}
+			return fallback;
+		}
+
+		private static DefaultValue findDefaultValue(String propertyName) {
+			try {
+				Field field = IngestionProperties.class.getDeclaredField(propertyName);
+				DefaultValue dv = field.getAnnotation(DefaultValue.class);
+				if (dv != null) {
+					return dv;
+				}
+			} catch (NoSuchFieldException ignored) {
+			}
+			for (Constructor<?> ctor : IngestionProperties.class.getDeclaredConstructors()) {
+				for (Parameter param : ctor.getParameters()) {
+					if (propertyName.equals(param.getName())) {
+						DefaultValue dv = param.getAnnotation(DefaultValue.class);
+						if (dv != null) {
+							return dv;
+						}
+					}
+				}
+			}
+			return null;
 		}
 	}
 
