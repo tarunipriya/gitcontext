@@ -1,8 +1,12 @@
 package io.github.tarunipriya.gitcontext.config;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
@@ -23,6 +27,7 @@ import org.springframework.validation.annotation.Validated;
  * @param reposDir local directory path where ingested repositories are cloned (defaults to {@code ./data/repos} relative to repo root)
  * @param qdrantUrl base URL for the Qdrant vector database instance (required, defaults to {@code http://localhost:6333})
  * @param llmApiKey API key for LLM provider access (optional)
+ * @param ingestion ingestion configuration for cloning, filtering, and parsing repository content
  */
 @Validated
 @ConfigurationProperties(prefix = "gitcontext")
@@ -30,7 +35,8 @@ public record GitContextProperties(
 		String githubToken,
 		@DefaultValue("./data/repos") Path reposDir,
 		@NotBlank @DefaultValue("http://localhost:6333") String qdrantUrl,
-		String llmApiKey
+		String llmApiKey,
+		@Valid @DefaultValue IngestionProperties ingestion
 ) {
 
 	/**
@@ -40,6 +46,59 @@ public record GitContextProperties(
 		reposDir = resolveToRepoRoot(reposDir != null ? reposDir : Path.of("./data/repos"));
 		if (qdrantUrl == null) {
 			qdrantUrl = "http://localhost:6333";
+		}
+		if (ingestion == null) {
+			ingestion = new IngestionProperties(512, 500, 4000, null, null, null, null, null);
+		}
+	}
+
+	/**
+	 * Configuration properties for repository ingestion.
+	 *
+	 * @param maxFileSizeKb maximum file size in kilobytes eligible for ingestion (default: 512)
+	 * @param maxCommits maximum number of commits to walk and ingest (default: 500)
+	 * @param maxDiffChars maximum character length for git diff output before truncation (default: 4000)
+	 * @param excludeDirs directory names to skip during working tree traversal
+	 * @param docExtensions file extensions classified as documentation documents
+	 * @param codeExtensions file extensions classified as source code documents
+	 * @param excludeLockFiles filenames of lock files to skip during ingestion
+	 * @param excludeMinifiedPatterns filename glob/suffix patterns for minified assets to skip
+	 */
+	public record IngestionProperties(
+			@Min(1) @DefaultValue("512") int maxFileSizeKb,
+			@Min(1) @DefaultValue("500") int maxCommits,
+			@Min(1) @DefaultValue("4000") int maxDiffChars,
+			@NotNull @DefaultValue({".git", "node_modules", "target", "build", "dist", "out", ".idea", ".vscode", ".venv", "venv", "__pycache__", ".gradle", ".mvn", "vendor", "coverage"}) List<String> excludeDirs,
+			@NotNull @DefaultValue({"md", "rst", "txt", "adoc"}) List<String> docExtensions,
+			@NotNull @DefaultValue({"java", "kt", "py", "js", "jsx", "ts", "tsx", "go", "rs", "c", "h", "cpp", "hpp", "cs", "rb", "php", "dart", "swift", "scala", "sql", "sh", "yml", "yaml", "toml", "json", "xml", "gradle"}) List<String> codeExtensions,
+			@NotNull @DefaultValue({"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"}) List<String> excludeLockFiles,
+			@NotNull @DefaultValue({"*.min.js", "*.min.css"}) List<String> excludeMinifiedPatterns
+	) {
+		public IngestionProperties {
+			if (maxFileSizeKb <= 0) {
+				maxFileSizeKb = 512;
+			}
+			if (maxCommits <= 0) {
+				maxCommits = 500;
+			}
+			if (maxDiffChars <= 0) {
+				maxDiffChars = 4000;
+			}
+			excludeDirs = excludeDirs != null ? List.copyOf(excludeDirs) : List.of(
+					".git", "node_modules", "target", "build", "dist", "out", ".idea", ".vscode", ".venv", "venv", "__pycache__", ".gradle", ".mvn", "vendor", "coverage"
+			);
+			docExtensions = docExtensions != null ? List.copyOf(docExtensions) : List.of(
+					"md", "rst", "txt", "adoc"
+			);
+			codeExtensions = codeExtensions != null ? List.copyOf(codeExtensions) : List.of(
+					"java", "kt", "py", "js", "jsx", "ts", "tsx", "go", "rs", "c", "h", "cpp", "hpp", "cs", "rb", "php", "dart", "swift", "scala", "sql", "sh", "yml", "yaml", "toml", "json", "xml", "gradle"
+			);
+			excludeLockFiles = excludeLockFiles != null ? List.copyOf(excludeLockFiles) : List.of(
+					"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"
+			);
+			excludeMinifiedPatterns = excludeMinifiedPatterns != null ? List.copyOf(excludeMinifiedPatterns) : List.of(
+					"*.min.js", "*.min.css"
+			);
 		}
 	}
 
@@ -67,7 +126,8 @@ public record GitContextProperties(
 				"githubToken=" + maskSecret(githubToken) + ", " +
 				"reposDir=" + reposDir + ", " +
 				"qdrantUrl=" + qdrantUrl + ", " +
-				"llmApiKey=" + maskSecret(llmApiKey) +
+				"llmApiKey=" + maskSecret(llmApiKey) + ", " +
+				"ingestion=" + ingestion +
 				"]";
 	}
 

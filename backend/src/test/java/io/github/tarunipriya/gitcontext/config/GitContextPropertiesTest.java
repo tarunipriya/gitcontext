@@ -1,6 +1,7 @@
 package io.github.tarunipriya.gitcontext.config;
 
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -34,6 +35,18 @@ class GitContextPropertiesTest {
 			assertThat(props.llmApiKey()).isNull();
 			assertThat(props.hasGithubToken()).isFalse();
 			assertThat(props.hasLlmApiKey()).isFalse();
+
+			// Ingestion defaults
+			GitContextProperties.IngestionProperties ingestion = props.ingestion();
+			assertThat(ingestion).isNotNull();
+			assertThat(ingestion.maxFileSizeKb()).isEqualTo(512);
+			assertThat(ingestion.maxCommits()).isEqualTo(500);
+			assertThat(ingestion.maxDiffChars()).isEqualTo(4000);
+			assertThat(ingestion.excludeDirs()).contains(".git", "node_modules", "target", "build", "dist", ".idea");
+			assertThat(ingestion.docExtensions()).contains("md", "rst", "txt", "adoc");
+			assertThat(ingestion.codeExtensions()).contains("java", "py", "ts", "go", "rs", "cpp");
+			assertThat(ingestion.excludeLockFiles()).contains("package-lock.json", "yarn.lock", "poetry.lock");
+			assertThat(ingestion.excludeMinifiedPatterns()).contains("*.min.js", "*.min.css");
 		});
 	}
 
@@ -44,7 +57,10 @@ class GitContextPropertiesTest {
 				"gitcontext.github-token=ghp_testToken12345",
 				"gitcontext.repos-dir=./custom/repos",
 				"gitcontext.qdrant-url=http://qdrant.internal:6333",
-				"gitcontext.llm-api-key=sk_testKey67890"
+				"gitcontext.llm-api-key=sk_testKey67890",
+				"gitcontext.ingestion.max-file-size-kb=1024",
+				"gitcontext.ingestion.max-commits=100",
+				"gitcontext.ingestion.max-diff-chars=2000"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -55,6 +71,10 @@ class GitContextPropertiesTest {
 			assertThat(props.reposDir().toString().replace('\\', '/')).endsWith("custom/repos");
 			assertThat(props.hasGithubToken()).isTrue();
 			assertThat(props.hasLlmApiKey()).isTrue();
+
+			assertThat(props.ingestion().maxFileSizeKb()).isEqualTo(1024);
+			assertThat(props.ingestion().maxCommits()).isEqualTo(100);
+			assertThat(props.ingestion().maxDiffChars()).isEqualTo(2000);
 		});
 	}
 
@@ -75,7 +95,8 @@ class GitContextPropertiesTest {
 				"ghp_superSecretToken",
 				Path.of("./data/repos"),
 				"http://localhost:6333",
-				"sk_superSecretLlmKey"
+				"sk_superSecretLlmKey",
+				null
 		);
 
 		String stringOutput = withSecrets.toString();
@@ -88,7 +109,8 @@ class GitContextPropertiesTest {
 				null,
 				Path.of("./data/repos"),
 				"http://localhost:6333",
-				""
+				"",
+				null
 		);
 
 		String unconfiguredOutput = withoutSecrets.toString();
