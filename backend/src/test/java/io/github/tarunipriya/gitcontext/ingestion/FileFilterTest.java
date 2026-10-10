@@ -121,4 +121,32 @@ class FileFilterTest {
 		assertThat(fileFilter.shouldIngest(tempDir, exeFile)).isFalse();
 		assertThat(fileFilter.shouldIngest(tempDir, unknownFile)).isFalse();
 	}
+
+	@Test
+	@DisplayName("Rejects files matching custom minified pattern when configured")
+	void testRejectsCustomMinifiedPattern() throws IOException {
+		GitContextProperties propertiesWithCustomPattern = new GitContextProperties(
+				null,
+				tempDir,
+				"http://localhost:6333",
+				null,
+				new GitContextProperties.IngestionProperties(
+						512, 500, 4000,
+						null, null, null, null,
+						java.util.List.of("*.bundle.js")
+				)
+		);
+		FileFilter customFilter = new FileFilter(propertiesWithCustomPattern);
+
+		Path bundleFile = tempDir.resolve("dist/app.bundle.js");
+		Files.createDirectories(bundleFile.getParent());
+		Files.writeString(bundleFile, "console.log('bundled');");
+
+		Path normalFile = tempDir.resolve("src/app.js");
+		Files.createDirectories(normalFile.getParent());
+		Files.writeString(normalFile, "console.log('normal');");
+
+		assertThat(customFilter.shouldIngest(tempDir, bundleFile)).isFalse();
+		assertThat(customFilter.shouldIngest(tempDir, normalFile)).isTrue();
+	}
 }
