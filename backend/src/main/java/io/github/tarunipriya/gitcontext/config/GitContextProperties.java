@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
@@ -35,6 +36,7 @@ import org.springframework.validation.annotation.Validated;
  * @param llmApiKey API key for LLM provider access (optional)
  * @param ingestion ingestion configuration for cloning, filtering, and parsing repository content
  * @param github GitHub REST API configuration for fetching pull requests and issues
+ * @param chunking chunking configuration for AST and fallback window chunkers
  */
 @Validated
 @ConfigurationProperties(prefix = "gitcontext")
@@ -44,12 +46,14 @@ public record GitContextProperties(
 		@NotBlank @DefaultValue("http://localhost:6333") String qdrantUrl,
 		String llmApiKey,
 		@Valid @DefaultValue IngestionProperties ingestion,
-		@Valid @DefaultValue GitHubProperties github
+		@Valid @DefaultValue GitHubProperties github,
+		@Valid @DefaultValue ChunkingProperties chunking
 ) {
 
 	/**
 	 * Compact constructor to normalise paths and apply defaults.
 	 */
+	@ConstructorBinding
 	public GitContextProperties {
 		reposDir = resolveToRepoRoot(reposDir != null ? reposDir : Path.of("./data/repos"));
 		if (qdrantUrl == null) {
@@ -61,6 +65,23 @@ public record GitContextProperties(
 		if (github == null) {
 			github = new GitHubProperties(null, 0, 0, 0, null, -1);
 		}
+		if (chunking == null) {
+			chunking = new ChunkingProperties(512, 40, 5, 60);
+		}
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers without chunking properties.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null);
 	}
 
 	/**
@@ -254,6 +275,22 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for chunking strategies under {@code gitcontext.chunking}.
+	 *
+	 * @param maxChunkTokens maximum token count per chunk before splitting (default: 512)
+	 * @param minChunkTokens minimum token threshold below which sections are merged (default: 40)
+	 * @param overlapLines number of overlapping lines between consecutive chunk windows (default: 5)
+	 * @param fallbackWindowLines line window size for the fallback line chunker (default: 60)
+	 */
+	public record ChunkingProperties(
+			@Min(1) @DefaultValue("512") int maxChunkTokens,
+			@Min(1) @DefaultValue("40") int minChunkTokens,
+			@Min(0) @DefaultValue("5") int overlapLines,
+			@Min(1) @DefaultValue("60") int fallbackWindowLines
+	) {
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -279,7 +316,8 @@ public record GitContextProperties(
 				"qdrantUrl=" + qdrantUrl + ", " +
 				"llmApiKey=" + maskSecret(llmApiKey) + ", " +
 				"ingestion=" + ingestion + ", " +
-				"github=" + github +
+				"github=" + github + ", " +
+				"chunking=" + chunking +
 				"]";
 	}
 

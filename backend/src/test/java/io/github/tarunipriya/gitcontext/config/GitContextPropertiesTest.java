@@ -57,6 +57,14 @@ class GitContextPropertiesTest {
 			assertThat(github.maxCommentsPerItem()).isEqualTo(50);
 			assertThat(github.incidentLabels()).containsExactly("incident", "bug", "postmortem", "outage");
 			assertThat(github.rateLimitWarnThreshold()).isEqualTo(50);
+
+			// Chunking defaults
+			GitContextProperties.ChunkingProperties chunking = props.chunking();
+			assertThat(chunking).isNotNull();
+			assertThat(chunking.maxChunkTokens()).isEqualTo(512);
+			assertThat(chunking.minChunkTokens()).isEqualTo(40);
+			assertThat(chunking.overlapLines()).isEqualTo(5);
+			assertThat(chunking.fallbackWindowLines()).isEqualTo(60);
 		});
 	}
 
@@ -76,7 +84,11 @@ class GitContextPropertiesTest {
 				"gitcontext.github.max-issues=75",
 				"gitcontext.github.max-comments-per-item=20",
 				"gitcontext.github.incident-labels=sev-1,incident,critical",
-				"gitcontext.github.rate-limit-warn-threshold=100"
+				"gitcontext.github.rate-limit-warn-threshold=100",
+				"gitcontext.chunking.max-chunk-tokens=256",
+				"gitcontext.chunking.min-chunk-tokens=20",
+				"gitcontext.chunking.overlap-lines=3",
+				"gitcontext.chunking.fallback-window-lines=40"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -98,6 +110,11 @@ class GitContextPropertiesTest {
 			assertThat(props.github().maxCommentsPerItem()).isEqualTo(20);
 			assertThat(props.github().incidentLabels()).containsExactly("sev-1", "incident", "critical");
 			assertThat(props.github().rateLimitWarnThreshold()).isEqualTo(100);
+
+			assertThat(props.chunking().maxChunkTokens()).isEqualTo(256);
+			assertThat(props.chunking().minChunkTokens()).isEqualTo(20);
+			assertThat(props.chunking().overlapLines()).isEqualTo(3);
+			assertThat(props.chunking().fallbackWindowLines()).isEqualTo(40);
 		});
 	}
 
@@ -120,6 +137,7 @@ class GitContextPropertiesTest {
 				"http://localhost:6333",
 				"sk_superSecretLlmKey",
 				null,
+				null,
 				null
 		);
 
@@ -134,6 +152,7 @@ class GitContextPropertiesTest {
 				Path.of("./data/repos"),
 				"http://localhost:6333",
 				"",
+				null,
 				null,
 				null
 		);
