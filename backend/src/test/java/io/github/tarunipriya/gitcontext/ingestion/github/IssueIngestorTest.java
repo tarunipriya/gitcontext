@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -131,5 +132,233 @@ class IssueIngestorTest {
 		assertThat(normalDoc.metadata().extra()).containsEntry("incident", "false");
 		assertThat(normalDoc.metadata().extra()).containsEntry("labels", "enhancement");
 		assertThat(normalDoc.metadata().extra()).containsEntry("state", "open");
+	}
+
+	@Test
+	@DisplayName("Pagination continues past pull requests across pages until maxIssues real issues are collected")
+	void testPaginationContinuesUntilMaxRealIssuesCollected() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		// Configure maxIssues = 2
+		GitContextProperties properties = createProperties(2, 50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		IssueIngestor ingestor = new IssueIngestor(client, properties);
+
+		// Page 1: 2 PRs, 1 real issue (issue #103)
+		HttpHeaders page1Headers = new HttpHeaders();
+		page1Headers.set(HttpHeaders.LINK, "<https://api.github.com/repos/testowner/testrepo/issues?state=all&page=2&per_page=100>; rel=\"next\"");
+
+		String page1Json = """
+				[
+					{
+						"number": 101,
+						"title": "PR 101",
+						"state": "open",
+						"pull_request": {"url": "https://api.github.com/repos/testowner/testrepo/pulls/101"}
+					},
+					{
+						"number": 102,
+						"title": "PR 102",
+						"state": "open",
+						"pull_request": {"url": "https://api.github.com/repos/testowner/testrepo/pulls/102"}
+					},
+					{
+						"number": 103,
+						"title": "Real Issue 103",
+						"state": "open",
+						"body": "First real issue",
+						"html_url": "https://github.com/testowner/testrepo/issues/103",
+						"created_at": "2026-10-01T10:00:00Z",
+						"labels": []
+					}
+				]
+				""";
+
+		// Page 2: 1 PR, 1 real issue (issue #105)
+		String page2Json = """
+				[
+					{
+						"number": 104,
+						"title": "PR 104",
+						"state": "open",
+						"pull_request": {"url": "https://api.github.com/repos/testowner/testrepo/pulls/104"}
+					},
+					{
+						"number": 105,
+						"title": "Real Issue 105",
+						"state": "open",
+						"body": "Second real issue",
+						"html_url": "https://github.com/testowner/testrepo/issues/105",
+						"created_at": "2026-10-02T10:00:00Z",
+						"labels": []
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(page1Json, MediaType.APPLICATION_JSON).headers(page1Headers));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&page=2&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(page2Json, MediaType.APPLICATION_JSON));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/103/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/105/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(2);
+		assertThat(documents.get(0).metadata().issueNumber()).isEqualTo(103);
+		assertThat(documents.get(1).metadata().issueNumber()).isEqualTo(105);
+	}
+
+	@Test
+	@DisplayName("Ingests issue with no incident labels and marks incident as false")
+	void testIssueWithNoIncidentLabel() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(10, 50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		IssueIngestor ingestor = new IssueIngestor(client, properties);
+
+		String issuesJson = """
+				[
+					{
+						"number": 201,
+						"title": "Update README docs",
+						"state": "open",
+						"body": "Clarify setup instructions",
+						"html_url": "https://github.com/testowner/testrepo/issues/201",
+						"created_at": "2026-10-01T10:00:00Z",
+						"labels": [
+							{"name": "documentation"}
+						]
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(issuesJson, MediaType.APPLICATION_JSON));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/201/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.metadata().extra()).containsEntry("incident", "false");
+		assertThat(doc.metadata().extra()).containsEntry("labels", "documentation");
+	}
+
+	@Test
+	@DisplayName("Ingests issue with null body cleanly without NPE or null text")
+	void testIssueWithNullBody() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(10, 50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		IssueIngestor ingestor = new IssueIngestor(client, properties);
+
+		String issuesJson = """
+				[
+					{
+						"number": 202,
+						"title": "Empty body issue",
+						"state": "open",
+						"body": null,
+						"html_url": "https://github.com/testowner/testrepo/issues/202",
+						"created_at": "2026-10-01T10:00:00Z",
+						"labels": []
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(issuesJson, MediaType.APPLICATION_JSON));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/202/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.content()).isEqualTo("# Empty body issue\n\nState: open");
+	}
+
+	@Test
+	@DisplayName("Limits issue comments to maxCommentsPerItem")
+	void testCommentsLimitedToMaxCommentsPerItem() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(10, 1);
+		GitHubClient client = new GitHubClient(builder, properties);
+		IssueIngestor ingestor = new IssueIngestor(client, properties);
+
+		String issuesJson = """
+				[
+					{
+						"number": 203,
+						"title": "Issue with discussion",
+						"state": "open",
+						"body": "Discussion topic",
+						"html_url": "https://github.com/testowner/testrepo/issues/203",
+						"created_at": "2026-10-01T10:00:00Z",
+						"labels": []
+					}
+				]
+				""";
+
+		String commentsJson = """
+				[
+					{"id": 1, "body": "First reply", "user": {"login": "user1"}},
+					{"id": 2, "body": "Second reply", "user": {"login": "user2"}}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues?state=all&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(issuesJson, MediaType.APPLICATION_JSON));
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/203/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(commentsJson, MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.content()).contains("- user1: First reply");
+		assertThat(doc.content()).doesNotContain("Second reply");
+	}
+
+	private static GitContextProperties createProperties(int maxIssues, int maxComments) {
+		return new GitContextProperties(
+				null,
+				Path.of("./data/repos"),
+				"http://localhost:6333",
+				null,
+				null,
+				new GitContextProperties.GitHubProperties("https://api.github.com", 200, maxIssues, maxComments, List.of("incident", "bug"), 50)
+		);
 	}
 }

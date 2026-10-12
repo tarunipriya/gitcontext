@@ -124,4 +124,209 @@ class PullRequestIngestorTest {
 		assertThat(doc.content()).contains("## Review comments");
 		assertThat(doc.content()).contains("- charlie (src/main/java/AuthFilter.java): Please add null check for token header.");
 	}
+
+	@Test
+	@DisplayName("Ingests open unmerged pull request with state open and no mergedAt")
+	void testOpenUnmergedPullRequest() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		PullRequestIngestor ingestor = new PullRequestIngestor(client, properties);
+
+		String prsJson = """
+				[
+					{
+						"number": 50,
+						"title": "feat: open work in progress",
+						"state": "open",
+						"body": "Still working on this",
+						"html_url": "https://github.com/testowner/testrepo/pull/50",
+						"created_at": "2026-10-03T10:00:00Z",
+						"merged_at": null,
+						"user": {"login": "dev1"}
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls?state=all&sort=created&direction=desc&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(prsJson, MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/50/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls/50/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.metadata().extra()).containsEntry("state", "open");
+		assertThat(doc.metadata().extra().get("mergedAt")).isEmpty();
+		assertThat(doc.content()).contains("State: open");
+	}
+
+	@Test
+	@DisplayName("Ingests closed but unmerged pull request with state closed")
+	void testClosedUnmergedPullRequest() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		PullRequestIngestor ingestor = new PullRequestIngestor(client, properties);
+
+		String prsJson = """
+				[
+					{
+						"number": 51,
+						"title": "feat: rejected proposal",
+						"state": "closed",
+						"body": "Closed without merge",
+						"html_url": "https://github.com/testowner/testrepo/pull/51",
+						"created_at": "2026-10-03T10:00:00Z",
+						"merged_at": null,
+						"user": {"login": "dev2"}
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls?state=all&sort=created&direction=desc&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(prsJson, MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/51/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls/51/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.metadata().extra()).containsEntry("state", "closed");
+		assertThat(doc.metadata().extra().get("mergedAt")).isEmpty();
+		assertThat(doc.content()).contains("State: closed");
+	}
+
+	@Test
+	@DisplayName("Ingests pull request with null body cleanly without errors or null text")
+	void testPullRequestWithNullBody() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		GitContextProperties properties = createProperties(50);
+		GitHubClient client = new GitHubClient(builder, properties);
+		PullRequestIngestor ingestor = new PullRequestIngestor(client, properties);
+
+		String prsJson = """
+				[
+					{
+						"number": 52,
+						"title": "fix: tiny typo fix",
+						"state": "open",
+						"body": null,
+						"html_url": "https://github.com/testowner/testrepo/pull/52",
+						"created_at": "2026-10-04T10:00:00Z",
+						"merged_at": null,
+						"user": {"login": "dev3"}
+					}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls?state=all&sort=created&direction=desc&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(prsJson, MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/52/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls/52/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		assertThat(doc.content()).isEqualTo("# fix: tiny typo fix\n\nState: open");
+	}
+
+	@Test
+	@DisplayName("Limits pull request comments to maxCommentsPerItem")
+	void testCommentsLimitedToMaxCommentsPerItem() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+
+		// Configure maxCommentsPerItem to 1
+		GitContextProperties properties = createProperties(1);
+		GitHubClient client = new GitHubClient(builder, properties);
+		PullRequestIngestor ingestor = new PullRequestIngestor(client, properties);
+
+		String prsJson = """
+				[
+					{
+						"number": 53,
+						"title": "PR with many comments",
+						"state": "open",
+						"body": "Check my PR",
+						"html_url": "https://github.com/testowner/testrepo/pull/53",
+						"created_at": "2026-10-04T10:00:00Z",
+						"user": {"login": "dev4"}
+					}
+				]
+				""";
+
+		String commentsJson = """
+				[
+					{"id": 1, "body": "Comment 1", "user": {"login": "u1"}},
+					{"id": 2, "body": "Comment 2", "user": {"login": "u2"}}
+				]
+				""";
+
+		String reviewCommentsJson = """
+				[
+					{"id": 11, "body": "Review 1", "path": "Foo.java", "user": {"login": "u3"}},
+					{"id": 12, "body": "Review 2", "path": "Foo.java", "user": {"login": "u4"}}
+				]
+				""";
+
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls?state=all&sort=created&direction=desc&per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(prsJson, MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/issues/53/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(commentsJson, MediaType.APPLICATION_JSON));
+		server.expect(requestTo("https://api.github.com/repos/testowner/testrepo/pulls/53/comments?per_page=100"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withSuccess(reviewCommentsJson, MediaType.APPLICATION_JSON));
+
+		List<Document> documents = ingestor.ingest(REPO);
+
+		server.verify();
+		assertThat(documents).hasSize(1);
+		Document doc = documents.get(0);
+		// With maxCommentsPerItem=1, getPaged caps each list at 1
+		assertThat(doc.content()).contains("- u1: Comment 1");
+		assertThat(doc.content()).doesNotContain("Comment 2");
+		assertThat(doc.content()).contains("- u3 (Foo.java): Review 1");
+		assertThat(doc.content()).doesNotContain("Review 2");
+	}
+
+	private static GitContextProperties createProperties(int maxComments) {
+		return new GitContextProperties(
+				null,
+				Path.of("./data/repos"),
+				"http://localhost:6333",
+				null,
+				null,
+				new GitContextProperties.GitHubProperties("https://api.github.com", 200, 200, maxComments, List.of("incident", "bug"), 50)
+		);
+	}
 }
