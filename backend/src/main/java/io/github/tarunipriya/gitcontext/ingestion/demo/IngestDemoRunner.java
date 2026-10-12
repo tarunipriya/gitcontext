@@ -1,15 +1,10 @@
 package io.github.tarunipriya.gitcontext.ingestion.demo;
 
-import io.github.tarunipriya.gitcontext.ingestion.CommitIngestor;
-import io.github.tarunipriya.gitcontext.ingestion.FileIngestor;
-import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner;
-import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
-import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
-import io.github.tarunipriya.gitcontext.ingestion.github.PullRequestIngestor;
+import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
+import io.github.tarunipriya.gitcontext.ingestion.IngestionService;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +20,8 @@ import org.springframework.stereotype.Component;
 /**
  * Demo runner active only when running with the {@code ingest-demo} Spring profile.
  *
- * <p>Clones or updates the configured demo repository, ingests its files, commits,
- * pull requests, and issues, prints diagnostic summary statistics to the log, and exits.
+ * <p>Ingests the configured demo repository via {@link IngestionService},
+ * prints diagnostic summary statistics and warnings to the log, and exits.
  */
 @Component
 @Profile("ingest-demo")
@@ -34,36 +29,20 @@ public class IngestDemoRunner implements CommandLineRunner {
 
 	private static final Logger log = LoggerFactory.getLogger(IngestDemoRunner.class);
 
-	private final RepositoryCloner repositoryCloner;
-	private final FileIngestor fileIngestor;
-	private final CommitIngestor commitIngestor;
-	private final PullRequestIngestor pullRequestIngestor;
-	private final IssueIngestor issueIngestor;
+	private final IngestionService ingestionService;
 	private final String demoRepoString;
 
 	/**
 	 * Creates a new {@link IngestDemoRunner}.
 	 *
-	 * @param repositoryCloner repository cloner
-	 * @param fileIngestor file ingestor
-	 * @param commitIngestor commit ingestor
-	 * @param pullRequestIngestor pull request ingestor
-	 * @param issueIngestor issue ingestor
+	 * @param ingestionService unified ingestion service
 	 * @param demoRepoString repository reference string to ingest
 	 */
 	public IngestDemoRunner(
-			RepositoryCloner repositoryCloner,
-			FileIngestor fileIngestor,
-			CommitIngestor commitIngestor,
-			PullRequestIngestor pullRequestIngestor,
-			IssueIngestor issueIngestor,
+			IngestionService ingestionService,
 			@Value("${gitcontext.demo.repo}") String demoRepoString
 	) {
-		this.repositoryCloner = Objects.requireNonNull(repositoryCloner);
-		this.fileIngestor = Objects.requireNonNull(fileIngestor);
-		this.commitIngestor = Objects.requireNonNull(commitIngestor);
-		this.pullRequestIngestor = Objects.requireNonNull(pullRequestIngestor);
-		this.issueIngestor = Objects.requireNonNull(issueIngestor);
+		this.ingestionService = Objects.requireNonNull(ingestionService);
 		this.demoRepoString = Objects.requireNonNull(demoRepoString);
 	}
 
@@ -74,18 +53,21 @@ public class IngestDemoRunner implements CommandLineRunner {
 		log.info("=================================================");
 
 		RepoRef repoRef = RepoRef.parse(demoRepoString);
-		ClonedRepo clonedRepo = repositoryCloner.cloneOrUpdate(repoRef);
+		IngestionResult result = ingestionService.ingest(repoRef);
 
-		List<Document> fileDocs = fileIngestor.ingest(clonedRepo);
-		List<Document> commitDocs = commitIngestor.ingest(clonedRepo);
-		List<Document> prDocs = pullRequestIngestor.ingest(repoRef);
-		List<Document> issueDocs = issueIngestor.ingest(repoRef);
-
-		List<Document> allDocs = new ArrayList<>(fileDocs.size() + commitDocs.size() + prDocs.size() + issueDocs.size());
-		allDocs.addAll(fileDocs);
-		allDocs.addAll(commitDocs);
-		allDocs.addAll(prDocs);
-		allDocs.addAll(issueDocs);
+		List<Document> allDocs = result.documents();
+		List<Document> fileDocs = allDocs.stream()
+				.filter(doc -> doc.metadata().sourceType() == SourceType.CODE || doc.metadata().sourceType() == SourceType.DOC)
+				.toList();
+		List<Document> commitDocs = allDocs.stream()
+				.filter(doc -> doc.metadata().sourceType() == SourceType.COMMIT)
+				.toList();
+		List<Document> prDocs = allDocs.stream()
+				.filter(doc -> doc.metadata().sourceType() == SourceType.PULL_REQUEST)
+				.toList();
+		List<Document> issueDocs = allDocs.stream()
+				.filter(doc -> doc.metadata().sourceType() == SourceType.ISSUE)
+				.toList();
 
 		long incidentIssueCount = issueDocs.stream()
 				.filter(doc -> "true".equals(doc.metadata().extra().get("incident")))
@@ -132,6 +114,10 @@ public class IngestDemoRunner implements CommandLineRunner {
 		prDocs.stream()
 				.limit(5)
 				.forEach(doc -> log.info("  - PR #{}: {}", doc.metadata().prNumber(), doc.metadata().title()));
+
+		// Warnings
+		log.info("Warnings ({}):", result.warnings().size());
+		result.warnings().forEach(w -> log.warn("  - {}", w));
 
 		log.info("=================================================");
 		log.info("Ingestion Demo Finished Successfully.");
