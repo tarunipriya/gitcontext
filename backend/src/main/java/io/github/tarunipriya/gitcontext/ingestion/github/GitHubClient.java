@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -77,16 +78,17 @@ public class GitHubClient {
 	}
 
 	/**
-	 * Fetches issues for the repository up to {@code maxItems}.
+	 * Fetches issues for the repository up to {@code maxItems}, filtering out pull request entries so
+	 * that pagination continues until {@code maxItems} real issues are collected (or pages are exhausted).
 	 *
 	 * @param repo repository reference
-	 * @param maxItems maximum number of issues to return
-	 * @return list of issue DTOs (may include pull requests)
+	 * @param maxItems maximum number of real issues to return
+	 * @return list of real issue DTOs
 	 */
 	public List<GitHubIssueDto> getIssues(RepoRef repo, int maxItems) {
 		Objects.requireNonNull(repo, "repo must not be null");
 		String uri = "/repos/" + repo.fullName() + "/issues?state=all";
-		return getPaged(uri, GitHubIssueDto.class, maxItems);
+		return getPaged(uri, GitHubIssueDto.class, maxItems, issue -> !issue.isPullRequest());
 	}
 
 	/**
@@ -128,6 +130,21 @@ public class GitHubClient {
 	 * @return unmodifiable list of collected items
 	 */
 	public <T> List<T> getPaged(String initialUri, Class<T> elementType, int maxItems) {
+		return getPaged(initialUri, elementType, maxItems, null);
+	}
+
+	/**
+	 * Performs a generic paginated GET request with item filtering, appending {@code per_page=100},
+	 * following {@code Link} headers with {@code rel="next"}, and respecting rate limits.
+	 *
+	 * @param initialUri the starting relative or absolute URI
+	 * @param elementType the DTO element class
+	 * @param maxItems maximum items to collect
+	 * @param filter optional predicate to filter items before counting towards {@code maxItems}
+	 * @param <T> DTO element type
+	 * @return unmodifiable list of collected items
+	 */
+	public <T> List<T> getPaged(String initialUri, Class<T> elementType, int maxItems, Predicate<T> filter) {
 		Objects.requireNonNull(initialUri, "initialUri must not be null");
 		Objects.requireNonNull(elementType, "elementType must not be null");
 
@@ -155,6 +172,9 @@ public class GitHubClient {
 				T[] body = response.getBody();
 				if (body != null) {
 					for (T item : body) {
+						if (filter != null && !filter.test(item)) {
+							continue;
+						}
 						collected.add(item);
 						if (collected.size() >= maxItems) {
 							break;
