@@ -5,6 +5,9 @@
 # Setting springdotenv.directory: .. directs the library to look one directory up from the backend/ working directory
 # to find the .env file at the repository root. Real system environment variables take precedence if defined.
 
+server:
+  port: 8081
+
 springdotenv:
   directory: ..
 
@@ -13,3 +16,4 @@ gitcontext:
   repos-dir: ${REPOS_DIR:./data/repos}
   qdrant-url: ${QDRANT_URL:http://localhost:6333}
   llm-api-key: ${LLM_API_KEY:}
+
