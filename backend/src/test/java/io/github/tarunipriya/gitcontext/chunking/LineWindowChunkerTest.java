@@ -119,4 +119,56 @@ class LineWindowChunkerTest {
 		assertThat(chunks.get(0).metadata().endLine()).isEqualTo(3);
 		assertThat(chunks.get(0).content()).isEqualTo("line 1\nline 2\nline 3");
 	}
+
+	@Test
+	@DisplayName("Shrinks window when lines exceed maxChunkTokens")
+	void testShrinkWindowWhenTokensExceeded() {
+		// Properties: maxChunkTokens = 20, fallbackWindowLines = 20
+		GitContextProperties limitProps = new GitContextProperties(
+				null, null, "http://localhost:6333", null, null, null,
+				new GitContextProperties.ChunkingProperties(20, 5, 2, 20)
+		);
+		LineWindowChunker tokenChunker = new LineWindowChunker(limitProps, tokenCounter, headerBuilder);
+
+		// 10 lines of 16 characters each (4 tokens per line).
+		// A full 20-line window would be 80 tokens, exceeding maxChunkTokens 20.
+		StringBuilder sb = new StringBuilder();
+		for (int i = 1; i <= 10; i++) {
+			sb.append("line ").append(String.format("%02d", i)).append(" 12345678\n");
+		}
+		Document doc = createDoc(sb.toString());
+		List<Chunk> chunks = tokenChunker.chunk(doc);
+
+		assertThat(chunks.size()).isGreaterThan(1);
+		for (Chunk chunk : chunks) {
+			assertThat(chunk.metadata().tokenCount()).isLessThanOrEqualTo(20);
+			assertThat(chunk.metadata().chunkType()).isEqualTo(ChunkType.LINES);
+		}
+	}
+
+	@Test
+	@DisplayName("A single very long line is hard-split into pieces with identical line numbers")
+	void testVeryLongLinesHardSplit() {
+		// Properties: maxChunkTokens = 25
+		GitContextProperties limitProps = new GitContextProperties(
+				null, null, "http://localhost:6333", null, null, null,
+				new GitContextProperties.ChunkingProperties(25, 5, 2, 20)
+		);
+		LineWindowChunker tokenChunker = new LineWindowChunker(limitProps, tokenCounter, headerBuilder);
+
+		// Single line with 300 characters (~75 tokens)
+		String longLine = "A".repeat(300);
+		Document doc = createDoc(longLine);
+		List<Chunk> chunks = tokenChunker.chunk(doc);
+
+		assertThat(chunks.size()).isGreaterThanOrEqualTo(3);
+		for (Chunk chunk : chunks) {
+			assertThat(chunk.metadata().startLine()).isEqualTo(1);
+			assertThat(chunk.metadata().endLine()).isEqualTo(1);
+			assertThat(chunk.metadata().tokenCount()).isLessThanOrEqualTo(25);
+		}
+		// Content combined equals original line
+		String combined = chunks.stream().map(Chunk::content).reduce("", String::concat);
+		assertThat(combined).isEqualTo(longLine);
+	}
 }

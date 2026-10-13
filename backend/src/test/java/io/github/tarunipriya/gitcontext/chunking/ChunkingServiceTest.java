@@ -107,4 +107,42 @@ class ChunkingServiceTest {
 			assertThat(run1.get(i).id()).isEqualTo(run2.get(i).id());
 		}
 	}
+
+	@Test
+	@DisplayName("When selected chunker throws, ChunkingService logs WARN and falls back to LineWindowChunker")
+	void testChunkerThrowsFallsBackToLineWindowChunker() {
+		Chunker throwingChunker = new Chunker() {
+			@Override
+			public boolean supports(Document document) {
+				return "bad.md".equals(document.metadata().path());
+			}
+
+			@Override
+			public List<Chunk> chunk(Document document) {
+				throw new IllegalStateException("Simulated chunker failure");
+			}
+		};
+
+		ChunkingService robustService = new ChunkingService(List.of(throwingChunker, lineWindowChunker));
+
+		Document badDoc = Document.create(
+				"line 1\nline 2\nline 3\n",
+				new DocumentMetadata("owner/repo", SourceType.DOC, "bad.md", null, null, null, null, null, null, "markdown", null, null),
+				"bad.md"
+		);
+		Document goodDoc = Document.create(
+				"good code line\n",
+				new DocumentMetadata("owner/repo", SourceType.CODE, "good.java", null, null, null, null, null, null, "java", null, null),
+				"good.java"
+		);
+
+		List<Chunk> chunks = robustService.chunkAll(List.of(badDoc, goodDoc));
+
+		assertThat(chunks).hasSize(2);
+		// badDoc was successfully chunked by LineWindowChunker fallback
+		assertThat(chunks.get(0).metadata().path()).isEqualTo("bad.md");
+		assertThat(chunks.get(0).metadata().chunkType()).isEqualTo(ChunkType.LINES);
+		assertThat(chunks.get(1).metadata().path()).isEqualTo("good.java");
+		assertThat(chunks.get(1).metadata().chunkType()).isEqualTo(ChunkType.LINES);
+	}
 }

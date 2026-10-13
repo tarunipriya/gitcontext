@@ -4,6 +4,7 @@ import io.github.tarunipriya.gitcontext.model.Chunk;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.Document;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,7 +26,13 @@ public class ChunkingService {
 	private static final Logger log = LoggerFactory.getLogger(ChunkingService.class);
 
 	private final List<Chunker> chunkers;
+	private final Chunker fallbackChunker;
 
+	/**
+	 * Creates a new {@link ChunkingService} with the provided chunker strategies ordered by priority.
+	 *
+	 * @param chunkers candidate chunker strategies
+	 */
 	public ChunkingService(List<Chunker> chunkers) {
 		Objects.requireNonNull(chunkers, "chunkers must not be null");
 		List<Chunker> ordered = new ArrayList<>();
@@ -38,10 +45,18 @@ public class ChunkingService {
 				ordered.add(c);
 			}
 		}
+		ordered.sort(Comparator.comparingInt(c -> {
+			if (c.getClass().getSimpleName().equals("CodeChunker")) return 10;
+			if (c.getClass().getSimpleName().equals("MarkdownChunker")) return 20;
+			if (c.getClass().getSimpleName().equals("RecordChunker")) return 30;
+			return 50;
+		}));
+
 		if (lineWindowChunker != null) {
 			ordered.add(lineWindowChunker);
 		}
 
+		this.fallbackChunker = lineWindowChunker;
 		this.chunkers = List.copyOf(ordered);
 	}
 
@@ -73,7 +88,25 @@ public class ChunkingService {
 				continue;
 			}
 
-			List<Chunk> docChunks = selected.chunk(doc);
+			List<Chunk> docChunks;
+			try {
+				docChunks = selected.chunk(doc);
+			} catch (Exception e) {
+				String docPath = doc.metadata().path() != null ? doc.metadata().path() : doc.id();
+				log.warn("Chunker {} failed for document path={}: {}",
+						selected.getClass().getSimpleName(), docPath, e.getMessage(), e);
+				if (fallbackChunker != null && selected != fallbackChunker && fallbackChunker.supports(doc)) {
+					try {
+						docChunks = fallbackChunker.chunk(doc);
+					} catch (Exception fallbackEx) {
+						log.warn("Fallback chunker failed for document path={}: {}",
+								docPath, fallbackEx.getMessage(), fallbackEx);
+						docChunks = List.of();
+					}
+				} else {
+					docChunks = List.of();
+				}
+			}
 			allChunks.addAll(docChunks);
 		}
 
