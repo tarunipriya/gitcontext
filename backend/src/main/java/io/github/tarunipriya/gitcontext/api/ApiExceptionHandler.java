@@ -1,10 +1,13 @@
 package io.github.tarunipriya.gitcontext.api;
 
+import io.github.tarunipriya.gitcontext.ingestion.IngestionQueueFullException;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -46,14 +49,30 @@ public class ApiExceptionHandler {
 	}
 
 	/**
-	 * Handles resource-not-found exceptions for missing jobs or repo summaries.
+	 * Handles resource-not-found exceptions for missing jobs, repos, or chunks.
 	 */
-	@ExceptionHandler({JobNotFoundException.class, RepoNotFoundException.class})
+	@ExceptionHandler({JobNotFoundException.class, RepoNotFoundException.class, ChunkNotFoundException.class})
 	public ProblemDetail handleNotFoundException(RuntimeException ex) {
 		log.warn("Resource not found: {}", ex.getMessage());
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
 		problem.setTitle("Resource Not Found");
 		return problem;
+	}
+
+	/**
+	 * Handles worker executor queue saturation with 503 Service Unavailable and Retry-After header.
+	 */
+	@ExceptionHandler(IngestionQueueFullException.class)
+	public ResponseEntity<ProblemDetail> handleQueueFullException(IngestionQueueFullException ex) {
+		log.warn("Ingestion queue full: {}", ex.getMessage());
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.SERVICE_UNAVAILABLE,
+				ex.getMessage()
+		);
+		problem.setTitle("Service Unavailable");
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+				.header(HttpHeaders.RETRY_AFTER, "60")
+				.body(problem);
 	}
 
 	/**

@@ -71,6 +71,27 @@ public record RepoRef(String owner, String name) {
 	}
 
 	/**
+	 * Returns the normalized lower-case repository identifier ("owner/name") used for case-insensitive lookups.
+	 *
+	 * @return normalized lower-case key
+	 */
+	public String normalizedKey() {
+		return owner.toLowerCase(java.util.Locale.ROOT) + "/" + name.toLowerCase(java.util.Locale.ROOT);
+	}
+
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (!(o instanceof RepoRef other)) return false;
+		return owner.equalsIgnoreCase(other.owner) && name.equalsIgnoreCase(other.name);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(owner.toLowerCase(java.util.Locale.ROOT), name.toLowerCase(java.util.Locale.ROOT));
+	}
+
+	/**
 	 * Returns the HTTPS clone URL for GitHub.
 	 *
 	 * @return clone URL string ending with .git

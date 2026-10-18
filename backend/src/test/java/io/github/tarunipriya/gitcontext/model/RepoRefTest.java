@@ -70,4 +70,21 @@ class RepoRefTest {
 		assertThatIllegalArgumentException()
 				.isThrownBy(() -> new RepoRef("owner", "  "));
 	}
+
+	@Test
+	@DisplayName("RepoRef equality and hashCode are case-insensitive while preserving submitted display name")
+	void testCaseInsensitiveEquality() {
+		RepoRef mixed = new RepoRef("TestOwner", "TestRepo");
+		RepoRef lower = new RepoRef("testowner", "testrepo");
+		RepoRef upper = new RepoRef("TESTOWNER", "TESTREPO");
+
+		assertThat(mixed).isEqualTo(lower);
+		assertThat(mixed).isEqualTo(upper);
+		assertThat(mixed.hashCode()).isEqualTo(lower.hashCode());
+		assertThat(mixed.hashCode()).isEqualTo(upper.hashCode());
+
+		assertThat(mixed.normalizedKey()).isEqualTo("testowner/testrepo");
+		assertThat(mixed.fullName()).isEqualTo("TestOwner/TestRepo");
+		assertThat(upper.fullName()).isEqualTo("TESTOWNER/TESTREPO");
+	}
 }
