@@ -122,7 +122,22 @@ class IngestionControllerTest {
 	}
 
 	@Test
-	@DisplayName("GET /api/repos/{owner}/{name}/summary returns 200 OK with counts")
+	@DisplayName("POST /api/ingestions returns 503 Service Unavailable with Retry-After header when queue is full")
+	void submitIngestion_queueFull_returns503WithRetryAfter() throws Exception {
+		when(ingestionJobService.submit(any()))
+				.thenThrow(new io.github.tarunipriya.gitcontext.ingestion.IngestionQueueFullException("Ingestion task queue is full, please retry later"));
+
+		mockMvc.perform(post("/api/ingestions")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"repo\":\"testowner/testrepo\"}"))
+				.andExpect(status().isServiceUnavailable())
+				.andExpect(header().string("Retry-After", "60"))
+				.andExpect(jsonPath("$.title").value("Service Unavailable"))
+				.andExpect(jsonPath("$.detail", containsString("Ingestion task queue is full")));
+	}
+
+	@Test
+	@DisplayName("GET /api/repos/{owner}/{name}/summary returns 200 OK with counts and chunking metrics")
 	void getRepoSummary_existing_returnsCounts() throws Exception {
 		RepoRef repo = new RepoRef("testowner", "testrepo");
 		String headSha = "abcdef1234567890abcdef1234567890abcdef12";
@@ -132,11 +147,19 @@ class IngestionControllerTest {
 				SourceType.PULL_REQUEST, 2,
 				SourceType.ISSUE, 1
 		);
+		Map<io.github.tarunipriya.gitcontext.model.ChunkType, Integer> chunkCounts = Map.of(
+				io.github.tarunipriya.gitcontext.model.ChunkType.CLASS, 3,
+				io.github.tarunipriya.gitcontext.model.ChunkType.METHOD, 5
+		);
 		IngestionResult result = new IngestionResult(
 				repo,
 				headSha,
 				List.of(),
 				counts,
+				List.of(),
+				chunkCounts,
+				42.5,
+				120,
 				Map.of(),
 				250L,
 				List.of("Warning: rate limit near threshold")
@@ -150,6 +173,11 @@ class IngestionControllerTest {
 				.andExpect(jsonPath("$.headCommitSha").value(headSha))
 				.andExpect(jsonPath("$.countsBySourceType.CODE").value(10))
 				.andExpect(jsonPath("$.countsBySourceType.COMMIT").value(5))
+				.andExpect(jsonPath("$.totalChunks").value(0))
+				.andExpect(jsonPath("$.chunkCountsByType.CLASS").value(3))
+				.andExpect(jsonPath("$.chunkCountsByType.METHOD").value(5))
+				.andExpect(jsonPath("$.avgChunkTokens").value(42.5))
+				.andExpect(jsonPath("$.maxChunkTokens").value(120))
 				.andExpect(jsonPath("$.warnings[0]", containsString("rate limit near threshold")));
 	}
 

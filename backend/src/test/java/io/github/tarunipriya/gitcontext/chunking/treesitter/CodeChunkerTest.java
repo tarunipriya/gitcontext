@@ -277,6 +277,48 @@ class CodeChunkerTest {
 	}
 
 	@Test
+	@DisplayName("JavaScript: class with methods, function declaration, and arrow function assigned to const")
+	void testJavaScriptChunking() throws IOException {
+		String source = loadFixture("sample.js");
+		Document doc = createDoc("sample.js", "javascript", source);
+
+		List<Chunk> chunks = codeChunker.chunk(doc);
+		assertThat(chunks).isNotEmpty();
+
+		// Class Calculator
+		Chunk calcClass = chunks.stream()
+				.filter(c -> c.metadata().chunkType() == ChunkType.CLASS && "Calculator".equals(c.metadata().symbolName()))
+				.findFirst()
+				.orElseThrow();
+		assertThat(calcClass.content()).contains("class Calculator");
+
+		// Methods add and subtract within Calculator
+		Chunk methodChunk = chunks.stream()
+				.filter(c -> c.metadata().chunkType() == ChunkType.METHOD && c.metadata().symbolName().contains("add"))
+				.findFirst()
+				.orElseThrow();
+		assertThat(methodChunk.metadata().parentSymbol()).isEqualTo("Calculator");
+		assertThat(methodChunk.content()).contains("add(n)");
+		assertThat(methodChunk.content()).contains("subtract(n)");
+
+		// Arrow function assigned to const -> FUNCTION
+		Chunk arrowFunc = chunks.stream()
+				.filter(c -> c.metadata().chunkType() == ChunkType.FUNCTION && "multiply".equals(c.metadata().symbolName()))
+				.findFirst()
+				.orElseThrow();
+		assertThat(arrowFunc.metadata().parentSymbol()).isNull();
+		assertThat(arrowFunc.content()).contains("const multiply =");
+
+		// Function declaration divide -> FUNCTION
+		Chunk divideFunc = chunks.stream()
+				.filter(c -> c.metadata().chunkType() == ChunkType.FUNCTION && "divide".equals(c.metadata().symbolName()))
+				.findFirst()
+				.orElseThrow();
+		assertThat(divideFunc.metadata().parentSymbol()).isNull();
+		assertThat(divideFunc.content()).contains("function divide");
+	}
+
+	@Test
 	@DisplayName("Telugu text and emoji in comments: chunk content and line numbers are exact (byte/char safety)")
 	void testTeluguUnicodeSafety() throws IOException {
 		String source = loadFixture("unicode_telugu.java");

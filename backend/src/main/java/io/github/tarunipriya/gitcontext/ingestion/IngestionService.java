@@ -1,9 +1,12 @@
 package io.github.tarunipriya.gitcontext.ingestion;
 
+import io.github.tarunipriya.gitcontext.chunking.ChunkingService;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
 import io.github.tarunipriya.gitcontext.ingestion.github.GitHubApiException;
 import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
 import io.github.tarunipriya.gitcontext.ingestion.github.PullRequestIngestor;
+import io.github.tarunipriya.gitcontext.model.Chunk;
+import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
@@ -20,7 +23,7 @@ import org.springframework.web.client.RestClientException;
 
 /**
  * Unified ingestion service orchestrating all repository ingestion stages:
- * cloning, file scanning, commit history parsing, pull requests, and issues.
+ * cloning, file scanning, commit history parsing, pull requests, issues, and chunking.
  */
 @Service
 public class IngestionService {
@@ -32,6 +35,7 @@ public class IngestionService {
 	private final CommitIngestor commitIngestor;
 	private final PullRequestIngestor pullRequestIngestor;
 	private final IssueIngestor issueIngestor;
+	private final ChunkingService chunkingService;
 
 	/**
 	 * Creates a new {@link IngestionService} with all required stage ingestors.
@@ -41,19 +45,22 @@ public class IngestionService {
 	 * @param commitIngestor git commit history ingestor
 	 * @param pullRequestIngestor GitHub pull request ingestor
 	 * @param issueIngestor GitHub issue ingestor
+	 * @param chunkingService document chunking service
 	 */
 	public IngestionService(
 			RepositoryCloner repositoryCloner,
 			FileIngestor fileIngestor,
 			CommitIngestor commitIngestor,
 			PullRequestIngestor pullRequestIngestor,
-			IssueIngestor issueIngestor
+			IssueIngestor issueIngestor,
+			ChunkingService chunkingService
 	) {
 		this.repositoryCloner = Objects.requireNonNull(repositoryCloner, "repositoryCloner must not be null");
 		this.fileIngestor = Objects.requireNonNull(fileIngestor, "fileIngestor must not be null");
 		this.commitIngestor = Objects.requireNonNull(commitIngestor, "commitIngestor must not be null");
 		this.pullRequestIngestor = Objects.requireNonNull(pullRequestIngestor, "pullRequestIngestor must not be null");
 		this.issueIngestor = Objects.requireNonNull(issueIngestor, "issueIngestor must not be null");
+		this.chunkingService = Objects.requireNonNull(chunkingService, "chunkingService must not be null");
 	}
 
 	/**
@@ -137,6 +144,21 @@ public class IngestionService {
 		stageDurations.put("issues", issueDuration);
 		log.info("Stage [issues] completed with {} documents in {} ms", issueCount, issueDuration);
 
+		// Stage 6: Chunking (non-fatal)
+		long chunkStart = System.currentTimeMillis();
+		List<Chunk> chunks = List.of();
+		try {
+			chunks = chunkingService.chunkAll(allDocuments);
+		} catch (Exception e) {
+			String msg = "Chunking stage failed unexpectedly: " + e.getMessage();
+			log.warn("Stage [chunking] failed unexpectedly: {}", e.getMessage(), e);
+			warnings.add(msg);
+			chunks = List.of();
+		}
+		long chunkDuration = System.currentTimeMillis() - chunkStart;
+		stageDurations.put("chunking", chunkDuration);
+		log.info("Stage [chunking] completed with {} chunks in {} ms", chunks.size(), chunkDuration);
+
 		// Counts by SourceType
 		Map<SourceType, Integer> counts = new EnumMap<>(SourceType.class);
 		for (SourceType type : SourceType.values()) {
@@ -146,15 +168,36 @@ public class IngestionService {
 			counts.merge(doc.metadata().sourceType(), 1, Integer::sum);
 		}
 
+		// Chunk metrics & counts by ChunkType
+		Map<ChunkType, Integer> chunkCounts = new EnumMap<>(ChunkType.class);
+		for (ChunkType type : ChunkType.values()) {
+			chunkCounts.put(type, 0);
+		}
+		int maxTokens = 0;
+		long totalTokens = 0;
+		for (Chunk chunk : chunks) {
+			chunkCounts.merge(chunk.metadata().chunkType(), 1, Integer::sum);
+			int tokens = chunk.metadata().tokenCount();
+			if (tokens > maxTokens) {
+				maxTokens = tokens;
+			}
+			totalTokens += tokens;
+		}
+		double avgTokens = chunks.isEmpty() ? 0.0 : (double) totalTokens / chunks.size();
+
 		long totalDuration = System.currentTimeMillis() - totalStart;
-		log.info("Ingestion completed for {} in {} ms: total documents={}, warnings={}",
-				repo.fullName(), totalDuration, allDocuments.size(), warnings.size());
+		log.info("Ingestion completed for {} in {} ms: total documents={}, total chunks={}, warnings={}",
+				repo.fullName(), totalDuration, allDocuments.size(), chunks.size(), warnings.size());
 
 		return new IngestionResult(
 				repo,
 				clonedRepo.headCommitSha(),
 				allDocuments,
 				counts,
+				chunks,
+				chunkCounts,
+				avgTokens,
+				maxTokens,
 				stageDurations,
 				totalDuration,
 				warnings

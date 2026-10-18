@@ -1,5 +1,7 @@
 package io.github.tarunipriya.gitcontext.ingestion;
 
+import io.github.tarunipriya.gitcontext.model.Chunk;
+import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
@@ -15,6 +17,10 @@ import java.util.Objects;
  * @param headCommitSha 40-character hexadecimal SHA of the HEAD commit
  * @param documents unmodifiable list of all ingested {@link Document} records
  * @param countsBySourceType document counts grouped by {@link SourceType}
+ * @param chunks unmodifiable list of all ingested {@link Chunk} segments
+ * @param chunkCountsByType chunk counts grouped by {@link ChunkType}
+ * @param avgChunkTokens average token count across all chunks (0.0 if empty)
+ * @param maxChunkTokens maximum token count observed across chunks (0 if empty)
  * @param stageDurationsMillis execution duration in milliseconds for each ingestion stage
  * @param totalDurationMillis total elapsed execution time in milliseconds
  * @param warnings non-fatal warnings encountered during ingestion (e.g. GitHub API errors)
@@ -25,6 +31,10 @@ public record IngestionResult(
 		String headCommitSha,
 		List<Document> documents,
 		Map<SourceType, Integer> countsBySourceType,
+		List<Chunk> chunks,
+		Map<ChunkType, Integer> chunkCountsByType,
+		double avgChunkTokens,
+		int maxChunkTokens,
 		Map<String, Long> stageDurationsMillis,
 		long totalDurationMillis,
 		List<String> warnings,
@@ -39,6 +49,8 @@ public record IngestionResult(
 		Objects.requireNonNull(headCommitSha, "headCommitSha must not be null");
 		documents = documents != null ? List.copyOf(documents) : List.of();
 		countsBySourceType = countsBySourceType != null ? Map.copyOf(countsBySourceType) : Map.of();
+		chunks = chunks != null ? List.copyOf(chunks) : List.of();
+		chunkCountsByType = chunkCountsByType != null ? Map.copyOf(chunkCountsByType) : Map.of();
 		stageDurationsMillis = stageDurationsMillis != null ? Map.copyOf(stageDurationsMillis) : Map.of();
 		warnings = warnings != null ? List.copyOf(warnings) : List.of();
 		ingestedAt = ingestedAt != null ? ingestedAt : Instant.now();
@@ -52,11 +64,55 @@ public record IngestionResult(
 			String headCommitSha,
 			List<Document> documents,
 			Map<SourceType, Integer> countsBySourceType,
+			List<Chunk> chunks,
+			Map<ChunkType, Integer> chunkCountsByType,
+			double avgChunkTokens,
+			int maxChunkTokens,
 			Map<String, Long> stageDurationsMillis,
 			long totalDurationMillis,
 			List<String> warnings
 	) {
-		this(repo, headCommitSha, documents, countsBySourceType, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+		this(repo, headCommitSha, documents, countsBySourceType, chunks, chunkCountsByType, avgChunkTokens, maxChunkTokens, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+	}
+
+	/**
+	 * Compatibility constructor for tests without chunk parameters.
+	 */
+	public IngestionResult(
+			RepoRef repo,
+			String headCommitSha,
+			List<Document> documents,
+			Map<SourceType, Integer> countsBySourceType,
+			Map<String, Long> stageDurationsMillis,
+			long totalDurationMillis,
+			List<String> warnings,
+			Instant ingestedAt
+	) {
+		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, stageDurationsMillis, totalDurationMillis, warnings, ingestedAt);
+	}
+
+	/**
+	 * Compatibility constructor for tests without chunk parameters defaulting {@code ingestedAt} to now.
+	 */
+	public IngestionResult(
+			RepoRef repo,
+			String headCommitSha,
+			List<Document> documents,
+			Map<SourceType, Integer> countsBySourceType,
+			Map<String, Long> stageDurationsMillis,
+			long totalDurationMillis,
+			List<String> warnings
+	) {
+		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+	}
+
+	/**
+	 * Total count of generated chunks.
+	 *
+	 * @return number of chunks
+	 */
+	public int totalChunks() {
+		return chunks.size();
 	}
 
 	/**

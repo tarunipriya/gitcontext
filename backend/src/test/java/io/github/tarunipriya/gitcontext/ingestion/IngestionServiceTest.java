@@ -6,10 +6,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.github.tarunipriya.gitcontext.chunking.ChunkingService;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
 import io.github.tarunipriya.gitcontext.ingestion.github.GitHubApiException;
 import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
 import io.github.tarunipriya.gitcontext.ingestion.github.PullRequestIngestor;
+import io.github.tarunipriya.gitcontext.model.Chunk;
+import io.github.tarunipriya.gitcontext.model.ChunkMetadata;
+import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.DocumentMetadata;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
@@ -43,6 +47,9 @@ class IngestionServiceTest {
 	@Mock
 	private IssueIngestor issueIngestor;
 
+	@Mock
+	private ChunkingService chunkingService;
+
 	private IngestionService ingestionService;
 	private final RepoRef repoRef = new RepoRef("testowner", "testrepo");
 
@@ -53,12 +60,13 @@ class IngestionServiceTest {
 				fileIngestor,
 				commitIngestor,
 				pullRequestIngestor,
-				issueIngestor
+				issueIngestor,
+				chunkingService
 		);
 	}
 
 	@Test
-	@DisplayName("Happy path returns combined documents and correct counts by source type")
+	@DisplayName("Happy path returns combined documents, correct counts by source type, and chunking results")
 	void happyPath_returnsCombinedDocumentsAndCorrectCounts() {
 		String headSha = "0123456789abcdef0123456789abcdef01234567";
 		ClonedRepo clonedRepo = new ClonedRepo(repoRef, Path.of("mock/path"), headSha, "main");
@@ -75,6 +83,12 @@ class IngestionServiceTest {
 		when(pullRequestIngestor.ingest(repoRef)).thenReturn(List.of(prDoc));
 		when(issueIngestor.ingest(repoRef)).thenReturn(List.of(issueDoc));
 
+		Chunk chunk1 = Chunk.of("doc1", 0, "chunk 1 text", "chunk 1 content",
+				ChunkMetadata.from(codeDoc1.metadata(), ChunkType.CLASS, 30, "App", null, null, 1, 10));
+		Chunk chunk2 = Chunk.of("doc2", 0, "chunk 2 text", "chunk 2 content",
+				ChunkMetadata.from(codeDoc2.metadata(), ChunkType.METHOD, 50, "util", "Util", null, 5, 20));
+		when(chunkingService.chunkAll(any())).thenReturn(List.of(chunk1, chunk2));
+
 		IngestionResult result = ingestionService.ingest(repoRef);
 
 		assertThat(result.repo()).isEqualTo(repoRef);
@@ -84,9 +98,44 @@ class IngestionServiceTest {
 		assertThat(result.countsBySourceType().get(SourceType.COMMIT)).isEqualTo(1);
 		assertThat(result.countsBySourceType().get(SourceType.PULL_REQUEST)).isEqualTo(1);
 		assertThat(result.countsBySourceType().get(SourceType.ISSUE)).isEqualTo(1);
+
+		// Chunks and metrics
+		assertThat(result.chunks()).containsExactly(chunk1, chunk2);
+		assertThat(result.totalChunks()).isEqualTo(2);
+		assertThat(result.chunkCountsByType().get(ChunkType.CLASS)).isEqualTo(1);
+		assertThat(result.chunkCountsByType().get(ChunkType.METHOD)).isEqualTo(1);
+		assertThat(result.avgChunkTokens()).isEqualTo(40.0);
+		assertThat(result.maxChunkTokens()).isEqualTo(50);
+
 		assertThat(result.warnings()).isEmpty();
-		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues");
+		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues", "chunking");
 		assertThat(result.totalDurationMillis()).isGreaterThanOrEqualTo(0);
+	}
+
+	@Test
+	@DisplayName("Chunking failure becomes a warning and preserves documents with zero chunks")
+	void chunkingFailure_becomesWarningAndPreservesDocs() {
+		String headSha = "0123456789abcdef0123456789abcdef01234567";
+		ClonedRepo clonedRepo = new ClonedRepo(repoRef, Path.of("mock/path"), headSha, "main");
+		when(repositoryCloner.cloneOrUpdate(repoRef)).thenReturn(clonedRepo);
+
+		Document fileDoc = createDoc(SourceType.CODE, "src/App.java", "code");
+		when(fileIngestor.ingest(clonedRepo)).thenReturn(List.of(fileDoc));
+		when(commitIngestor.ingest(clonedRepo)).thenReturn(List.of());
+		when(pullRequestIngestor.ingest(repoRef)).thenReturn(List.of());
+		when(issueIngestor.ingest(repoRef)).thenReturn(List.of());
+
+		when(chunkingService.chunkAll(any())).thenThrow(new RuntimeException("Tree-sitter unexpected parser panic"));
+
+		IngestionResult result = ingestionService.ingest(repoRef);
+
+		assertThat(result.documents()).containsExactly(fileDoc);
+		assertThat(result.chunks()).isEmpty();
+		assertThat(result.totalChunks()).isZero();
+		assertThat(result.avgChunkTokens()).isEqualTo(0.0);
+		assertThat(result.maxChunkTokens()).isZero();
+		assertThat(result.warnings()).hasSize(1);
+		assertThat(result.warnings().getFirst()).contains("Chunking stage failed unexpectedly: Tree-sitter unexpected parser panic");
 	}
 
 	@Test
@@ -104,6 +153,7 @@ class IngestionServiceTest {
 		when(commitIngestor.ingest(clonedRepo)).thenReturn(List.of(commitDoc));
 		when(pullRequestIngestor.ingest(repoRef)).thenThrow(new GitHubApiException(403, "GitHub API rate limit exceeded"));
 		when(issueIngestor.ingest(repoRef)).thenReturn(List.of(issueDoc));
+		when(chunkingService.chunkAll(any())).thenReturn(List.of());
 
 		IngestionResult result = ingestionService.ingest(repoRef);
 
@@ -125,7 +175,7 @@ class IngestionServiceTest {
 				.isInstanceOf(RuntimeException.class)
 				.hasMessageContaining("Git clone failed");
 
-		verifyNoInteractions(fileIngestor, commitIngestor, pullRequestIngestor, issueIngestor);
+		verifyNoInteractions(fileIngestor, commitIngestor, pullRequestIngestor, issueIngestor, chunkingService);
 	}
 
 	private Document createDoc(SourceType sourceType, String key, String content) {

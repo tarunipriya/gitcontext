@@ -136,4 +136,57 @@ class IngestionJobServiceTest {
 		assertThat(recent.getFirst().jobId()).isEqualTo(job2.jobId());
 		assertThat(recent.getLast().jobId()).isEqualTo(job1.jobId());
 	}
+
+	@Test
+	@DisplayName("Executor queue full rejection removes queued job and throws IngestionQueueFullException")
+	void executorQueueFull_removesQueuedJobAndThrows() {
+		Executor rejectingExecutor = task -> {
+			throw new java.util.concurrent.RejectedExecutionException("Queue capacity 100 exceeded");
+		};
+		IngestionJobService jobService = new IngestionJobService(ingestionService, rejectingExecutor);
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> jobService.submit(repoRef))
+				.isInstanceOf(IngestionQueueFullException.class)
+				.hasMessageContaining("Ingestion task queue is full");
+
+		// Stored jobs must NOT contain a stranded QUEUED job
+		assertThat(jobService.getRecentJobs()).isEmpty();
+	}
+
+	@Test
+	@DisplayName("Repo lookup and duplicate-job check are case-insensitive")
+	void repoLookupAndDuplicateCheck_areCaseInsensitive() {
+		Executor synchronousExecutor = Runnable::run;
+		IngestionJobService jobService = new IngestionJobService(ingestionService, synchronousExecutor);
+
+		RepoRef lowerRepo = new RepoRef("myowner", "myrepo");
+		RepoRef upperRepo = new RepoRef("MYOWNER", "MYREPO");
+		RepoRef mixedRepo = new RepoRef("MyOwner", "MyRepo");
+
+		IngestionResult mockResult = new IngestionResult(
+				lowerRepo,
+				"sha-case",
+				List.of(),
+				Map.of(),
+				Map.of(),
+				50L,
+				List.of()
+		);
+		when(ingestionService.ingest(any())).thenReturn(mockResult);
+
+		jobService.submit(lowerRepo);
+
+		// Lookups with different casings return the completed result
+		assertThat(jobService.getLatestResult(upperRepo)).isPresent();
+		assertThat(jobService.getLatestResult(mixedRepo)).isPresent();
+		assertThat(jobService.getLatestResult(upperRepo).get().repo().fullName()).isEqualTo("myowner/myrepo");
+
+		// Duplicate job check with noopExecutor
+		Executor noopExecutor = task -> {};
+		IngestionJobService noopJobService = new IngestionJobService(ingestionService, noopExecutor);
+
+		IngestionJob job1 = noopJobService.submit(lowerRepo);
+		IngestionJob job2 = noopJobService.submit(upperRepo);
+		assertThat(job2.jobId()).isEqualTo(job1.jobId());
+	}
 }

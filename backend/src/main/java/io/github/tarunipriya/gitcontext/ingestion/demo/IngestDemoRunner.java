@@ -1,6 +1,5 @@
 package io.github.tarunipriya.gitcontext.ingestion.demo;
 
-import io.github.tarunipriya.gitcontext.chunking.ChunkingService;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionService;
 import io.github.tarunipriya.gitcontext.model.Chunk;
@@ -24,8 +23,8 @@ import org.springframework.stereotype.Component;
 /**
  * Demo runner active only when running with the {@code ingest-demo} Spring profile.
  *
- * <p>Ingests the configured demo repository via {@link IngestionService}, chunks all documents via
- * {@link ChunkingService}, prints diagnostic summary statistics and warnings to the log, and exits.
+ * <p>Ingests the configured demo repository via {@link IngestionService}, prints diagnostic summary
+ * statistics and warnings from {@link IngestionResult} to the log, and exits.
  */
 @Component
 @Profile("ingest-demo")
@@ -34,23 +33,19 @@ public class IngestDemoRunner implements CommandLineRunner {
 	private static final Logger log = LoggerFactory.getLogger(IngestDemoRunner.class);
 
 	private final IngestionService ingestionService;
-	private final ChunkingService chunkingService;
 	private final String demoRepoString;
 
 	/**
 	 * Creates a new {@link IngestDemoRunner}.
 	 *
 	 * @param ingestionService unified ingestion service
-	 * @param chunkingService unified chunking service
 	 * @param demoRepoString repository reference string to ingest
 	 */
 	public IngestDemoRunner(
 			IngestionService ingestionService,
-			ChunkingService chunkingService,
 			@Value("${gitcontext.demo.repo:tarunipriya/gitcontext}") String demoRepoString
 	) {
 		this.ingestionService = Objects.requireNonNull(ingestionService);
-		this.chunkingService = Objects.requireNonNull(chunkingService);
 		this.demoRepoString = Objects.requireNonNull(demoRepoString);
 	}
 
@@ -129,24 +124,14 @@ public class IngestDemoRunner implements CommandLineRunner {
 
 		// Chunking Execution & Diagnostics
 		log.info("---------------- Chunking Summary ----------------");
-		List<Chunk> allChunks = chunkingService.chunkAll(allDocs);
-		log.info("Total Chunks Created: {}", allChunks.size());
+		List<Chunk> allChunks = result.chunks();
+		log.info("Total Chunks Created: {}", result.totalChunks());
 
-		Map<ChunkType, Long> byChunkType = allChunks.stream()
-				.collect(Collectors.groupingBy(c -> c.metadata().chunkType(), Collectors.counting()));
 		log.info("Chunks per ChunkType:");
-		byChunkType.forEach((type, count) -> log.info("  - {}: {}", type, count));
+		result.chunkCountsByType().forEach((type, count) -> log.info("  - {}: {}", type, count));
 
-		double avgTokens = allChunks.stream()
-				.mapToInt(c -> c.metadata().tokenCount())
-				.average()
-				.orElse(0.0);
-		int maxTokens = allChunks.stream()
-				.mapToInt(c -> c.metadata().tokenCount())
-				.max()
-				.orElse(0);
-		log.info("Average Token Count: {}", String.format(Locale.ROOT, "%.2f", avgTokens));
-		log.info("Max Token Count: {}", maxTokens);
+		log.info("Average Token Count: {}", String.format(Locale.ROOT, "%.2f", result.avgChunkTokens()));
+		log.info("Max Token Count: {}", result.maxChunkTokens());
 
 		log.info("---------------- Sample AST Chunks (GitHubClient.java) ----------------");
 		List<Chunk> gitHubClientChunks = allChunks.stream()

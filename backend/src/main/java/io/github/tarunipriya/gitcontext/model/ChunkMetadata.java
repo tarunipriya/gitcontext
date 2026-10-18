@@ -69,6 +69,10 @@ public record ChunkMetadata(
 
 	/**
 	 * Factory method copying shared provenance from {@link DocumentMetadata} while setting chunk-specific attributes.
+	 *
+	 * <p>For {@link SourceType#CODE} and {@link SourceType#DOC} chunks with line numbers, sets the chunk URL
+	 * to a GitHub blob citation URL with line anchors (e.g. {@code #L147-L192} or single-line {@code #L12}).
+	 * Non-file chunks (e.g. commits, pull requests, issues) retain their parent document URL.
 	 */
 	public static ChunkMetadata from(
 			DocumentMetadata docMeta,
@@ -81,12 +85,13 @@ public record ChunkMetadata(
 			Integer endLine
 	) {
 		Objects.requireNonNull(docMeta, "docMeta must not be null");
+		String chunkUrl = computeCitationUrl(docMeta, startLine, endLine);
 		return new ChunkMetadata(
 				docMeta.repo(),
 				docMeta.sourceType(),
 				docMeta.path(),
 				docMeta.language(),
-				docMeta.url(),
+				chunkUrl,
 				docMeta.commitSha(),
 				docMeta.author(),
 				docMeta.timestamp(),
@@ -98,5 +103,28 @@ public record ChunkMetadata(
 				endLine,
 				tokenCount
 		);
+	}
+
+	private static String computeCitationUrl(DocumentMetadata docMeta, Integer startLine, Integer endLine) {
+		if ((docMeta.sourceType() == SourceType.CODE || docMeta.sourceType() == SourceType.DOC) && startLine != null) {
+			String baseUrl = docMeta.url();
+			if (baseUrl == null && docMeta.path() != null) {
+				String sha = (docMeta.commitSha() != null && !docMeta.commitSha().isBlank())
+						? docMeta.commitSha()
+						: "HEAD";
+				baseUrl = "https://github.com/" + docMeta.repo() + "/blob/" + sha + "/" + docMeta.path();
+			}
+			if (baseUrl != null) {
+				int hashIdx = baseUrl.indexOf('#');
+				if (hashIdx >= 0) {
+					baseUrl = baseUrl.substring(0, hashIdx);
+				}
+				String anchor = (endLine != null && !endLine.equals(startLine))
+						? "#L" + startLine + "-L" + endLine
+						: "#L" + startLine;
+				return baseUrl + anchor;
+			}
+		}
+		return docMeta.url();
 	}
 }
