@@ -57,6 +57,37 @@
 			<artifactId>org.eclipse.jgit</artifactId>
 			<version>7.3.0.202506031305-r</version>
 		</dependency>
+		<!-- Tree-sitter Java bindings and language grammar artifacts for AST-aware code chunking (bundles native libraries for Windows x64) -->
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter</artifactId>
+			<version>0.26.6</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter-java</artifactId>
+			<version>0.23.5</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter-python</artifactId>
+			<version>0.25.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter-javascript</artifactId>
+			<version>0.25.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter-typescript</artifactId>
+			<version>0.23.2</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.bonede</groupId>
+			<artifactId>tree-sitter-tsx</artifactId>
+			<version>0.23.2</version>
+		</dependency>
 	</dependencies>
 
 	<build>
