@@ -37,6 +37,8 @@ import org.springframework.validation.annotation.Validated;
  * @param ingestion ingestion configuration for cloning, filtering, and parsing repository content
  * @param github GitHub REST API configuration for fetching pull requests and issues
  * @param chunking chunking configuration for AST and fallback window chunkers
+ * @param embedding embedding configuration for local vector model inference
+ * @param qdrant Qdrant vector database configuration
  */
 @Validated
 @ConfigurationProperties(prefix = "gitcontext")
@@ -47,7 +49,9 @@ public record GitContextProperties(
 		String llmApiKey,
 		@Valid @DefaultValue IngestionProperties ingestion,
 		@Valid @DefaultValue GitHubProperties github,
-		@Valid @DefaultValue ChunkingProperties chunking
+		@Valid @DefaultValue ChunkingProperties chunking,
+		@Valid @DefaultValue EmbeddingProperties embedding,
+		@Valid @DefaultValue QdrantProperties qdrant
 ) {
 
 	/**
@@ -68,6 +72,33 @@ public record GitContextProperties(
 		if (chunking == null) {
 			chunking = new ChunkingProperties(512, 40, 5, 60);
 		}
+		if (embedding == null) {
+			embedding = new EmbeddingProperties(32, "Represent this sentence for searching relevant passages: ");
+		}
+		if (qdrant == null) {
+			qdrant = new QdrantProperties(qdrantUrl, "gitcontext_chunks", 128, 30);
+		} else {
+			String effectiveUrl = (qdrant.url() != null && !qdrant.url().isBlank()) ? qdrant.url() : qdrantUrl;
+			String effectiveCollection = (qdrant.collection() != null && !qdrant.collection().isBlank()) ? qdrant.collection() : "gitcontext_chunks";
+			int effectiveBatch = qdrant.upsertBatchSize() > 0 ? qdrant.upsertBatchSize() : 128;
+			int effectiveTimeout = qdrant.timeoutSeconds() > 0 ? qdrant.timeoutSeconds() : 30;
+			qdrant = new QdrantProperties(effectiveUrl, effectiveCollection, effectiveBatch, effectiveTimeout);
+		}
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with chunking properties.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, null, null);
 	}
 
 	/**
@@ -81,7 +112,7 @@ public record GitContextProperties(
 			IngestionProperties ingestion,
 			GitHubProperties github
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null, null, null);
 	}
 
 	/**
@@ -291,6 +322,34 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for text embeddings under {@code gitcontext.embedding}.
+	 *
+	 * @param batchSize maximum number of text segments embedded in a single forward pass (default: 32)
+	 * @param queryPrefix instruction prefix prepended to search queries prior to embedding (default: "Represent this sentence for searching relevant passages: ")
+	 */
+	public record EmbeddingProperties(
+			@Min(1) @DefaultValue("32") int batchSize,
+			@NotBlank @DefaultValue("Represent this sentence for searching relevant passages: ") String queryPrefix
+	) {
+	}
+
+	/**
+	 * Configuration properties for Qdrant vector database under {@code gitcontext.qdrant}.
+	 *
+	 * @param url base URL of the Qdrant service (derived from {@code gitcontext.qdrant-url})
+	 * @param collection collection name for chunk vector points (default: "gitcontext_chunks")
+	 * @param upsertBatchSize maximum number of points upserted per batch request (default: 128)
+	 * @param timeoutSeconds connection and request timeout in seconds (default: 30)
+	 */
+	public record QdrantProperties(
+			String url,
+			@NotBlank @DefaultValue("gitcontext_chunks") String collection,
+			@Min(1) @DefaultValue("128") int upsertBatchSize,
+			@Min(1) @DefaultValue("30") int timeoutSeconds
+	) {
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -317,7 +376,9 @@ public record GitContextProperties(
 				"llmApiKey=" + maskSecret(llmApiKey) + ", " +
 				"ingestion=" + ingestion + ", " +
 				"github=" + github + ", " +
-				"chunking=" + chunking +
+				"chunking=" + chunking + ", " +
+				"embedding=" + embedding + ", " +
+				"qdrant=" + qdrant +
 				"]";
 	}
 
