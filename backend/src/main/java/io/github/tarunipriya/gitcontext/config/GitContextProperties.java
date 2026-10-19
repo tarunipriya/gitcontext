@@ -57,7 +57,9 @@ public record GitContextProperties(
 		@Valid @DefaultValue QdrantProperties qdrant,
 		@Valid @DefaultValue KeywordProperties keyword,
 		@Valid @DefaultValue HybridProperties hybrid,
-		@Valid @DefaultValue RerankProperties rerank
+		@Valid @DefaultValue RerankProperties rerank,
+		@Valid @DefaultValue LlmProperties llm,
+		@Valid @DefaultValue DemoProperties demo
 ) {
 
 	/**
@@ -117,6 +119,77 @@ public record GitContextProperties(
 					1000
 			);
 		}
+		if (llm == null) {
+			llm = new LlmProperties(
+					"gemini",
+					"gemini-3.5-flash",
+					"gemini-3.8-flash",
+					"https://generativelanguage.googleapis.com/v1beta",
+					0.2,
+					2048,
+					60,
+					2,
+					"low"
+			);
+		} else {
+			String p = (llm.provider() != null && !llm.provider().isBlank()) ? llm.provider() : "gemini";
+			String m = (llm.model() != null && !llm.model().isBlank()) ? llm.model() : "gemini-3.5-flash";
+			String fb = (llm.fallbackModel() != null && !llm.fallbackModel().isBlank()) ? llm.fallbackModel() : "gemini-3.8-flash";
+			String u = (llm.baseUrl() != null && !llm.baseUrl().isBlank()) ? llm.baseUrl() : "https://generativelanguage.googleapis.com/v1beta";
+			double t = llm.temperature() >= 0.0 ? llm.temperature() : 0.2;
+			int mot = llm.maxOutputTokens() > 0 ? llm.maxOutputTokens() : 2048;
+			int ts = llm.timeoutSeconds() > 0 ? llm.timeoutSeconds() : 60;
+			int mr = llm.maxRetries() >= 0 ? llm.maxRetries() : 2;
+			String tl = (llm.thinkingLevel() != null && !llm.thinkingLevel().isBlank()) ? llm.thinkingLevel() : "low";
+			llm = new LlmProperties(p, m, fb, u, t, mot, ts, mr, tl);
+		}
+		if (demo == null) {
+			demo = new DemoProperties("tarunipriya/gitcontext", false);
+		} else {
+			String r = (demo.repo() != null && !demo.repo().isBlank()) ? demo.repo() : "tarunipriya/gitcontext";
+			demo = new DemoProperties(r, demo.forceReingest());
+		}
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all properties except demo.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid,
+			RerankProperties rerank,
+			LlmProperties llm
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, null);
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all search properties except llm.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid,
+			RerankProperties rerank
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, null, null);
 	}
 
 	/**
@@ -135,7 +208,7 @@ public record GitContextProperties(
 			KeywordProperties keyword,
 			HybridProperties hybrid
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, null, null);
 	}
 
 	/**
@@ -475,6 +548,44 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for LLM answer generation under {@code gitcontext.llm}.
+	 *
+	 * @param provider LLM provider name (default: "gemini")
+	 * @param model primary LLM model identifier (default: "gemini-3.5-flash")
+	 * @param fallbackModel fallback model identifier when primary model fails (default: "gemini-3.8-flash")
+	 * @param baseUrl base URL for provider REST endpoint (default: "https://generativelanguage.googleapis.com/v1beta")
+	 * @param temperature generation temperature (default: 0.2)
+	 * @param maxOutputTokens maximum generation token length (default: 2048)
+	 * @param timeoutSeconds request timeout in seconds (default: 60)
+	 * @param maxRetries maximum retry attempts for 429 and 5xx errors (default: 2)
+	 * @param thinkingLevel thinking effort preset for reasoning models (default: "low")
+	 */
+	public record LlmProperties(
+			@NotBlank @DefaultValue("gemini") String provider,
+			@NotBlank @DefaultValue("gemini-3.5-flash") String model,
+			@NotBlank @DefaultValue("gemini-3.8-flash") String fallbackModel,
+			@NotBlank @DefaultValue("https://generativelanguage.googleapis.com/v1beta") String baseUrl,
+			@DefaultValue("0.2") double temperature,
+			@Min(1) @DefaultValue("2048") int maxOutputTokens,
+			@Min(1) @DefaultValue("60") int timeoutSeconds,
+			@Min(0) @DefaultValue("2") int maxRetries,
+			@NotBlank @DefaultValue("low") String thinkingLevel
+	) {
+	}
+
+	/**
+	 * Configuration properties for running demo profiles under {@code gitcontext.demo}.
+	 *
+	 * @param repo repository to run the demo against (default: "tarunipriya/gitcontext")
+	 * @param forceReingest whether to force full re-ingestion before demo queries (default: false)
+	 */
+	public record DemoProperties(
+			@NotBlank @DefaultValue("tarunipriya/gitcontext") String repo,
+			@DefaultValue("false") boolean forceReingest
+	) {
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -506,7 +617,9 @@ public record GitContextProperties(
 				"qdrant=" + qdrant + ", " +
 				"keyword=" + keyword + ", " +
 				"hybrid=" + hybrid + ", " +
-				"rerank=" + rerank +
+				"rerank=" + rerank + ", " +
+				"llm=" + llm + ", " +
+				"demo=" + demo +
 				"]";
 	}
 

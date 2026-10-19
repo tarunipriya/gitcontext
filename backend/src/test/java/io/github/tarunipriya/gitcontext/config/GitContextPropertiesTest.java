@@ -105,6 +105,25 @@ class GitContextPropertiesTest {
 			assertThat(rerank.tokenizerUrl()).isEqualTo("https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json");
 			assertThat(rerank.candidates()).isEqualTo(30);
 			assertThat(rerank.maxTextChars()).isEqualTo(1000);
+
+			// LLM defaults
+			GitContextProperties.LlmProperties llm = props.llm();
+			assertThat(llm).isNotNull();
+			assertThat(llm.provider()).isEqualTo("gemini");
+			assertThat(llm.model()).isEqualTo("gemini-3.5-flash");
+			assertThat(llm.fallbackModel()).isEqualTo("gemini-3.8-flash");
+			assertThat(llm.baseUrl()).isEqualTo("https://generativelanguage.googleapis.com/v1beta");
+			assertThat(llm.temperature()).isEqualTo(0.2);
+			assertThat(llm.maxOutputTokens()).isEqualTo(2048);
+			assertThat(llm.timeoutSeconds()).isEqualTo(60);
+			assertThat(llm.maxRetries()).isEqualTo(2);
+			assertThat(llm.thinkingLevel()).isEqualTo("low");
+
+			// Demo defaults
+			GitContextProperties.DemoProperties demo = props.demo();
+			assertThat(demo).isNotNull();
+			assertThat(demo.repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(demo.forceReingest()).isFalse();
 		});
 	}
 
@@ -146,7 +165,18 @@ class GitContextPropertiesTest {
 				"gitcontext.rerank.model-url=https://custom/model.onnx",
 				"gitcontext.rerank.tokenizer-url=https://custom/tokenizer.json",
 				"gitcontext.rerank.candidates=15",
-				"gitcontext.rerank.max-text-chars=1500"
+				"gitcontext.rerank.max-text-chars=1500",
+				"gitcontext.llm.provider=gemini-custom",
+				"gitcontext.llm.model=gemini-1.5-pro",
+				"gitcontext.llm.fallback-model=gemini-1.5-flash",
+				"gitcontext.llm.base-url=https://custom.googleapis.com",
+				"gitcontext.llm.temperature=0.7",
+				"gitcontext.llm.max-output-tokens=2048",
+				"gitcontext.llm.timeout-seconds=45",
+				"gitcontext.llm.max-retries=3",
+				"gitcontext.llm.thinking-level=medium",
+				"gitcontext.demo.repo=custom/demo-repo",
+				"gitcontext.demo.force-reingest=true"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -197,6 +227,42 @@ class GitContextPropertiesTest {
 			assertThat(props.rerank().tokenizerUrl()).isEqualTo("https://custom/tokenizer.json");
 			assertThat(props.rerank().candidates()).isEqualTo(15);
 			assertThat(props.rerank().maxTextChars()).isEqualTo(1500);
+
+			assertThat(props.llm().provider()).isEqualTo("gemini-custom");
+			assertThat(props.llm().model()).isEqualTo("gemini-1.5-pro");
+			assertThat(props.llm().fallbackModel()).isEqualTo("gemini-1.5-flash");
+			assertThat(props.llm().baseUrl()).isEqualTo("https://custom.googleapis.com");
+			assertThat(props.llm().temperature()).isEqualTo(0.7);
+			assertThat(props.llm().maxOutputTokens()).isEqualTo(2048);
+			assertThat(props.llm().timeoutSeconds()).isEqualTo(45);
+			assertThat(props.llm().maxRetries()).isEqualTo(3);
+			assertThat(props.llm().thinkingLevel()).isEqualTo("medium");
+
+			assertThat(props.demo().repo()).isEqualTo("custom/demo-repo");
+			assertThat(props.demo().forceReingest()).isTrue();
+		});
+	}
+
+	@Test
+	@DisplayName("Demo properties bind default and custom values")
+	void testDemoPropertiesBinding() {
+		runner.run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.demo()).isNotNull();
+			assertThat(props.demo().repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(props.demo().forceReingest()).isFalse();
+		});
+
+		runner.withPropertyValues(
+				"gitcontext.demo.repo=test/custom-demo-repo",
+				"gitcontext.demo.force-reingest=true"
+		).run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.demo()).isNotNull();
+			assertThat(props.demo().repo()).isEqualTo("test/custom-demo-repo");
+			assertThat(props.demo().forceReingest()).isTrue();
 		});
 	}
 
