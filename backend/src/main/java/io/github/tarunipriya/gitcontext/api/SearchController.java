@@ -1,10 +1,14 @@
 package io.github.tarunipriya.gitcontext.api;
 
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
-import io.github.tarunipriya.gitcontext.indexing.VectorSearchResult;
 import io.github.tarunipriya.gitcontext.indexing.VectorStore;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableException;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
+import io.github.tarunipriya.gitcontext.retrieval.HybridSearchResult;
+import io.github.tarunipriya.gitcontext.retrieval.HybridSearchService;
+import io.github.tarunipriya.gitcontext.retrieval.SearchMode;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -22,37 +26,49 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * REST controller providing semantic vector search and indexing status endpoints.
+ * REST controller providing repository search across vector, keyword, and hybrid modes, and indexing status.
  */
 @RestController
 public class SearchController {
 
 	private static final Logger log = LoggerFactory.getLogger(SearchController.class);
 
+	private final HybridSearchService hybridSearchService;
 	private final VectorStore vectorStore;
+	private final KeywordIndex keywordIndex;
 	private final GitContextProperties properties;
 
 	/**
 	 * Creates a new {@link SearchController}.
 	 *
+	 * @param hybridSearchService unified hybrid search service
 	 * @param vectorStore vector store facade
+	 * @param keywordIndex Lucene keyword index facade
 	 * @param properties application configuration properties
 	 */
-	public SearchController(VectorStore vectorStore, GitContextProperties properties) {
+	public SearchController(
+			HybridSearchService hybridSearchService,
+			VectorStore vectorStore,
+			KeywordIndex keywordIndex,
+			GitContextProperties properties
+	) {
+		this.hybridSearchService = Objects.requireNonNull(hybridSearchService, "hybridSearchService must not be null");
 		this.vectorStore = Objects.requireNonNull(vectorStore, "vectorStore must not be null");
+		this.keywordIndex = Objects.requireNonNull(keywordIndex, "keywordIndex must not be null");
 		this.properties = Objects.requireNonNull(properties, "properties must not be null");
 	}
 
 	/**
-	 * Executes a semantic vector search across chunks of the specified repository.
+	 * Executes a search across repository chunks using the requested mode (vector, keyword, or hybrid).
 	 *
 	 * @param owner repository owner
 	 * @param name repository name
 	 * @param q required query text (1–500 characters after trimming)
 	 * @param k maximum number of hits (default 10, min 1, max 50)
+	 * @param mode search mode: vector, keyword, or hybrid (case-insensitive, default from config)
 	 * @param type optional comma-separated {@link ChunkType} filter values
 	 * @param path optional path prefix filter
-	 * @return search response containing query, limits, timings, and ranked hits
+	 * @return search response containing query, limits, mode, warnings, timings, and ranked hits
 	 */
 	@GetMapping("/api/repos/{owner}/{name}/search")
 	public ResponseEntity<SearchResponse> search(
@@ -60,6 +76,7 @@ public class SearchController {
 			@PathVariable String name,
 			@RequestParam(name = "q", required = false) String q,
 			@RequestParam(name = "k", defaultValue = "10") int k,
+			@RequestParam(name = "mode", required = false) String mode,
 			@RequestParam(name = "type", required = false) String type,
 			@RequestParam(name = "path", required = false) String path
 	) {
@@ -67,18 +84,50 @@ public class SearchController {
 
 		String validatedQuery = validateQuery(q);
 		int validatedK = validateK(k);
+		SearchMode searchMode = parseSearchMode(mode);
 		Set<ChunkType> types = parseChunkTypes(type);
 
-		long pointsCount = vectorStore.countRepoPoints(repo);
-		if (pointsCount == 0) {
+		// Check repository existence in both indexes
+		boolean keywordExists = keywordIndex.exists(repo);
+		boolean vectorExists = false;
+		boolean vectorCheckFailed = false;
+		QdrantUnavailableException qdrantEx = null;
+
+		try {
+			vectorExists = vectorStore.countRepoPoints(repo) > 0;
+		} catch (QdrantUnavailableException ex) {
+			vectorCheckFailed = true;
+			qdrantEx = ex;
+		}
+
+		// 503 behavior: only when the chosen mode cannot run at all
+		if (searchMode == SearchMode.VECTOR && vectorCheckFailed) {
+			throw qdrantEx;
+		}
+		if (searchMode == SearchMode.KEYWORD && !keywordExists && vectorExists) {
+			throw new IllegalStateException("Keyword index missing for repository " + repo.fullName());
+		}
+		if (searchMode == SearchMode.HYBRID && vectorCheckFailed && !keywordExists) {
+			throw qdrantEx;
+		}
+
+		// Return 404 only if the repo exists in neither index
+		if (!keywordExists && !vectorExists && !vectorCheckFailed) {
 			throw new RepoNotFoundException(repo.fullName());
 		}
 
-		VectorSearchResult searchResult = vectorStore.searchWithTimings(repo, validatedQuery, validatedK, types, path);
+		HybridSearchResult searchResult = hybridSearchService.search(
+				repo,
+				validatedQuery,
+				validatedK,
+				types,
+				path,
+				searchMode
+		);
 
-		log.info("Search repo='{}' k={} hits={} embedMillis={} searchMillis={} tookMillis={}",
-				repo.fullName(), validatedK, searchResult.hits().size(),
-				searchResult.embedMillis(), searchResult.searchMillis(), searchResult.tookMillis());
+		log.info("Search repo='{}' mode={} k={} hits={} tookMillis={}",
+				repo.fullName(), searchResult.mode(), validatedK, searchResult.hits().size(),
+				searchResult.tookMillis());
 
 		List<SearchHitItemResponse> hitResponses = searchResult.hits().stream()
 				.map(SearchHitItemResponse::from)
@@ -87,9 +136,14 @@ public class SearchController {
 		SearchResponse response = new SearchResponse(
 				validatedQuery,
 				validatedK,
+				searchResult.mode(),
 				searchResult.tookMillis(),
-				searchResult.embedMillis(),
-				searchResult.searchMillis(),
+				searchResult.vectorMillis(),
+				searchResult.keywordMillis(),
+				searchResult.fusionMillis(),
+				0L,
+				searchResult.vectorMillis(),
+				searchResult.warnings(),
 				hitResponses
 		);
 
@@ -132,6 +186,20 @@ public class SearchController {
 		return k;
 	}
 
+	private SearchMode parseSearchMode(String modeParam) {
+		if (modeParam == null || modeParam.isBlank()) {
+			return properties.hybrid().defaultMode();
+		}
+		try {
+			return SearchMode.valueOf(modeParam.trim().toUpperCase(Locale.ROOT));
+		} catch (IllegalArgumentException e) {
+			String allowed = Arrays.stream(SearchMode.values())
+					.map(Enum::name)
+					.collect(Collectors.joining(", "));
+			throw new IllegalArgumentException("Unknown search mode: '" + modeParam + "'. Allowed values are: [" + allowed + "]");
+		}
+	}
+
 	private Set<ChunkType> parseChunkTypes(String typeParam) {
 		if (typeParam == null || typeParam.isBlank()) {
 			return Set.of();
@@ -147,8 +215,8 @@ public class SearchController {
 				result.add(ChunkType.valueOf(part.toUpperCase(Locale.ROOT)));
 			} catch (IllegalArgumentException ex) {
 				String allowed = Arrays.stream(ChunkType.values())
-						.map(Enum::name)
-						.collect(Collectors.joining(", "));
+					.map(Enum::name)
+					.collect(Collectors.joining(", "));
 				throw new IllegalArgumentException("Unknown chunk type: '" + part + "'. Allowed values are: [" + allowed + "]");
 			}
 		}

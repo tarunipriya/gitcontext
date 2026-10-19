@@ -79,6 +79,22 @@ class GitContextPropertiesTest {
 			assertThat(qdrant.collection()).isEqualTo("gitcontext_chunks");
 			assertThat(qdrant.upsertBatchSize()).isEqualTo(128);
 			assertThat(qdrant.timeoutSeconds()).isEqualTo(30);
+
+			// Keyword defaults
+			GitContextProperties.KeywordProperties keyword = props.keyword();
+			assertThat(keyword).isNotNull();
+			assertThat(keyword.indexDir()).isAbsolute();
+			assertThat(keyword.indexDir().toString().replace('\\', '/')).endsWith("data/lucene");
+			assertThat(keyword.symbolBoost()).isEqualTo(3.0);
+			assertThat(keyword.parentSymbolBoost()).isEqualTo(1.5);
+			assertThat(keyword.pathBoost()).isEqualTo(1.0);
+
+			// Hybrid defaults
+			GitContextProperties.HybridProperties hybrid = props.hybrid();
+			assertThat(hybrid).isNotNull();
+			assertThat(hybrid.candidates()).isEqualTo(50);
+			assertThat(hybrid.rrfK()).isEqualTo(60);
+			assertThat(hybrid.defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID);
 		});
 	}
 
@@ -107,7 +123,14 @@ class GitContextPropertiesTest {
 				"gitcontext.embedding.query-prefix=Represent query:",
 				"gitcontext.qdrant.collection=custom_chunks",
 				"gitcontext.qdrant.upsert-batch-size=64",
-				"gitcontext.qdrant.timeout-seconds=45"
+				"gitcontext.qdrant.timeout-seconds=45",
+				"gitcontext.keyword.index-dir=./custom/lucene",
+				"gitcontext.keyword.symbol-boost=4.5",
+				"gitcontext.keyword.parent-symbol-boost=2.5",
+				"gitcontext.keyword.path-boost=1.5",
+				"gitcontext.hybrid.candidates=30",
+				"gitcontext.hybrid.rrf-k=40",
+				"gitcontext.hybrid.default-mode=KEYWORD"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -142,6 +165,15 @@ class GitContextPropertiesTest {
 			assertThat(props.qdrant().collection()).isEqualTo("custom_chunks");
 			assertThat(props.qdrant().upsertBatchSize()).isEqualTo(64);
 			assertThat(props.qdrant().timeoutSeconds()).isEqualTo(45);
+
+			assertThat(props.keyword().indexDir().toString().replace('\\', '/')).endsWith("custom/lucene");
+			assertThat(props.keyword().symbolBoost()).isEqualTo(4.5);
+			assertThat(props.keyword().parentSymbolBoost()).isEqualTo(2.5);
+			assertThat(props.keyword().pathBoost()).isEqualTo(1.5);
+
+			assertThat(props.hybrid().candidates()).isEqualTo(30);
+			assertThat(props.hybrid().rrfK()).isEqualTo(40);
+			assertThat(props.hybrid().defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.KEYWORD);
 		});
 	}
 
