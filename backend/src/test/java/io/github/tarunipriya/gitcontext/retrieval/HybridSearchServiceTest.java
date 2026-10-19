@@ -36,8 +36,12 @@ class HybridSearchServiceTest {
 	@Mock
 	private KeywordIndex keywordIndex;
 
+	@Mock
+	private io.github.tarunipriya.gitcontext.retrieval.rerank.Reranker reranker;
+
 	private HybridSearchService hybridSearchService;
 	private final RepoRef repo = new RepoRef("testowner", "testrepo");
+	private GitContextProperties props;
 
 	@BeforeEach
 	void setUp() {
@@ -46,7 +50,15 @@ class HybridSearchServiceTest {
 				60,
 				SearchMode.HYBRID
 		);
-		GitContextProperties props = new GitContextProperties(
+		GitContextProperties.RerankProperties rerankProps = new GitContextProperties.RerankProperties(
+				false,
+				"ms-marco-MiniLM-L-6-v2",
+				"http://localhost/model.onnx",
+				"http://localhost/tokenizer.json",
+				30,
+				1000
+		);
+		props = new GitContextProperties(
 				null,
 				Path.of("./data/repos"),
 				"http://localhost:6333",
@@ -57,9 +69,10 @@ class HybridSearchServiceTest {
 				null,
 				null,
 				null,
-				hybridProps
+				hybridProps,
+				rerankProps
 		);
-		hybridSearchService = new HybridSearchService(vectorStore, keywordIndex, props);
+		hybridSearchService = new HybridSearchService(vectorStore, keywordIndex, reranker, props);
 	}
 
 	private SearchHit createHit(String chunkId, double score, String symbolName) {
@@ -196,5 +209,182 @@ class HybridSearchServiceTest {
 		assertThat(result.hits().get(0).vectorScore()).isEqualTo(0.92);
 		assertThat(result.hits().get(0).keywordScore()).isNull();
 		assertThat(result.warnings()).anyMatch(w -> w.contains("Keyword index missing") && w.contains("testowner/testrepo"));
+	}
+
+	@Test
+	@DisplayName("Rerank ON invokes Reranker and orders top-k results by rerank score with metadata")
+	void search_hybridMode_rerankOn_invokesRerankerAndReturnsTopK() {
+		SearchHit hit1 = createHit("c1", 0.90, "sym1");
+		SearchHit hit2 = createHit("c2", 0.80, "sym2");
+		when(vectorStore.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of(hit1, hit2));
+
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		when(keywordIndex.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of(hit2));
+
+		// In fusion, c2 has higher score than c1.
+		// When reranking, c1 gets 0.99 (fused rank 2), c2 gets 0.40 (fused rank 1).
+		when(reranker.rerank(eq("query"), any()))
+				.thenAnswer(inv -> {
+					List<HybridSearchHit> candidates = inv.getArgument(1);
+					return List.of(
+							new io.github.tarunipriya.gitcontext.retrieval.rerank.RerankedHit(candidates.get(1), 0.99, 2),
+							new io.github.tarunipriya.gitcontext.retrieval.rerank.RerankedHit(candidates.get(0), 0.40, 1)
+					);
+				});
+
+		HybridSearchResult result = hybridSearchService.search(
+				repo, "query", 5, null, null, SearchMode.HYBRID, true, false);
+
+		assertThat(result.reranked()).isTrue();
+		assertThat(result.rerankMillis()).isGreaterThanOrEqualTo(0L);
+		assertThat(result.hits()).hasSize(2);
+
+		// c1 was reranked to #1
+		assertThat(result.hits().get(0).hit().chunkId()).isEqualTo("c1");
+		assertThat(result.hits().get(0).rerankScore()).isEqualTo(0.99);
+		assertThat(result.hits().get(0).fusedRank()).isEqualTo(2);
+
+		// c2 was reranked to #2
+		assertThat(result.hits().get(1).hit().chunkId()).isEqualTo("c2");
+		assertThat(result.hits().get(1).rerankScore()).isEqualTo(0.40);
+		assertThat(result.hits().get(1).fusedRank()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("Rerank OFF leaves results un-reranked and does not call Reranker")
+	void search_hybridMode_rerankOff_skipsReranker() {
+		SearchHit hit1 = createHit("c1", 0.90, "sym1");
+		when(vectorStore.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of(hit1));
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		when(keywordIndex.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of());
+
+		HybridSearchResult result = hybridSearchService.search(
+				repo, "query", 5, null, null, SearchMode.HYBRID, false, false);
+
+		assertThat(result.reranked()).isFalse();
+		assertThat(result.rerankMillis()).isEqualTo(0L);
+		assertThat(result.hits()).hasSize(1);
+		assertThat(result.hits().get(0).rerankScore()).isNull();
+		assertThat(result.hits().get(0).fusedRank()).isNull();
+
+		verify(reranker, never()).rerank(any(), any());
+	}
+
+	@Test
+	@DisplayName("Fallback with warning when the reranker throws an exception")
+	void search_hybridMode_rerankerThrows_fallbackWithWarning() {
+		SearchHit hit1 = createHit("c1", 0.90, "sym1");
+		when(vectorStore.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of(hit1));
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		when(keywordIndex.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of());
+
+		when(reranker.rerank(eq("query"), any()))
+				.thenThrow(new RuntimeException("ONNX native runtime error"));
+
+		HybridSearchResult result = hybridSearchService.search(
+				repo, "query", 5, null, null, SearchMode.HYBRID, true, false);
+
+		assertThat(result.reranked()).isFalse();
+		assertThat(result.hits()).hasSize(1);
+		assertThat(result.hits().get(0).hit().chunkId()).isEqualTo("c1");
+		assertThat(result.warnings()).anyMatch(w -> w.contains("Reranking skipped: ONNX native runtime error"));
+	}
+
+	@Test
+	@DisplayName("Only candidates hits are sent to the reranker")
+	void search_hybridMode_onlyCandidatesHitsSentToReranker() {
+		// Create 40 hits from vector and keyword
+		List<SearchHit> manyHits = new java.util.ArrayList<>();
+		for (int i = 0; i < 40; i++) {
+			manyHits.add(createHit("chunk-" + i, 0.99 - (i * 0.01), "sym" + i));
+		}
+		when(vectorStore.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(manyHits);
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		when(keywordIndex.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of());
+
+		when(reranker.rerank(eq("query"), any()))
+				.thenAnswer(inv -> {
+					List<HybridSearchHit> candidates = inv.getArgument(1);
+					// Verify that exactly 30 candidates (from rerank.candidates config) are sent
+					assertThat(candidates).hasSize(30);
+					return List.of(new io.github.tarunipriya.gitcontext.retrieval.rerank.RerankedHit(candidates.get(0), 0.9, 1));
+				});
+
+		hybridSearchService.search(repo, "query", 5, null, null, SearchMode.HYBRID, true, false);
+
+		verify(reranker).rerank(eq("query"), any());
+	}
+
+	@Test
+	@DisplayName("excludeTests filters test chunks and returns k results when enough non-test hits exist")
+	void search_hybridMode_excludeTests_filtersTestChunksAndReturnsKResults() {
+		List<SearchHit> hits = List.of(
+				createHitWithPath("c1", "src/test/java/ServiceTest.java"),
+				createHitWithPath("c2", "src/main/java/Service.java"),
+				createHitWithPath("c3", "src/tests/test_util.py"),
+				createHitWithPath("c4", "src/main/java/Util.java"),
+				createHitWithPath("c5", "src/main/java/RepoTest.java"),
+				createHitWithPath("c6", "src/main/java/Repo.java"),
+				createHitWithPath("c7", "frontend/App.test.ts"),
+				createHitWithPath("c8", "frontend/App.tsx"),
+				createHitWithPath("c9", "src/main/java/Config.java"),
+				createHitWithPath("c10", "src/main/java/Client.java")
+		);
+
+		when(vectorStore.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(hits);
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		when(keywordIndex.search(eq(repo), eq("query"), eq(50), any(), any()))
+				.thenReturn(List.of());
+
+		// Request top 5 with excludeTests=true (rerank=false)
+		HybridSearchResult result = hybridSearchService.search(
+				repo, "query", 5, null, null, SearchMode.HYBRID, false, true);
+
+		// Exactly 5 results should be returned
+		assertThat(result.hits()).hasSize(5);
+
+		// None of the results should be test paths
+		for (HybridSearchHit hit : result.hits()) {
+			assertThat(TestFileFilter.isTestPath(hit.hit().path())).isFalse();
+		}
+
+		// The non-test paths in order: c2, c4, c6, c8, c9
+		List<String> chunkIds = result.hits().stream().map(h -> h.hit().chunkId()).toList();
+		assertThat(chunkIds).containsExactly("c2", "c4", "c6", "c8", "c9");
+	}
+
+	private SearchHit createHitWithPath(String chunkId, String path) {
+		return new SearchHit(
+				"id-" + chunkId,
+				0.8,
+				repo.normalizedKey(),
+				"run1",
+				chunkId,
+				"doc-" + chunkId,
+				0,
+				SourceType.CODE,
+				ChunkType.METHOD,
+				path,
+				"java",
+				"sym",
+				null,
+				null,
+				1,
+				20,
+				30,
+				"url",
+				"sha",
+				"text",
+				"content"
+		);
 	}
 }

@@ -94,6 +94,12 @@
 			<groupId>dev.langchain4j</groupId>
 			<artifactId>langchain4j-embeddings-bge-small-en-v15-q</artifactId>
 		</dependency>
+		<!-- In-process ONNX cross-encoder scoring model for local search result reranking -->
+		<dependency>
+			<groupId>dev.langchain4j</groupId>
+			<artifactId>langchain4j-onnx-scoring</artifactId>
+			<version>1.22.0-beta32</version>
+		</dependency>
 		<!-- Apache Lucene for BM25 keyword search, AST symbol matching, and hybrid retrieval -->
 		<dependency>
 			<groupId>org.apache.lucene</groupId>

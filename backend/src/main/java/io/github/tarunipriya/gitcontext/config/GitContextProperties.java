@@ -56,7 +56,8 @@ public record GitContextProperties(
 		@Valid @DefaultValue EmbeddingProperties embedding,
 		@Valid @DefaultValue QdrantProperties qdrant,
 		@Valid @DefaultValue KeywordProperties keyword,
-		@Valid @DefaultValue HybridProperties hybrid
+		@Valid @DefaultValue HybridProperties hybrid,
+		@Valid @DefaultValue RerankProperties rerank
 ) {
 
 	/**
@@ -106,6 +107,35 @@ public record GitContextProperties(
 			SearchMode m = hybrid.defaultMode() != null ? hybrid.defaultMode() : SearchMode.HYBRID;
 			hybrid = new HybridProperties(c, k, m);
 		}
+		if (rerank == null) {
+			rerank = new RerankProperties(
+					false,
+					"ms-marco-MiniLM-L-6-v2",
+					"https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model_quantized.onnx",
+					"https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json",
+					30,
+					1000
+			);
+		}
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all search properties except rerank.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, null);
 	}
 
 	/**
@@ -120,7 +150,7 @@ public record GitContextProperties(
 			GitHubProperties github,
 			ChunkingProperties chunking
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, null, null, null, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, null, null, null, null, null);
 	}
 
 	/**
@@ -134,7 +164,7 @@ public record GitContextProperties(
 			IngestionProperties ingestion,
 			GitHubProperties github
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null, null, null, null, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null, null, null, null, null, null);
 	}
 
 	/**
@@ -425,6 +455,26 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for cross-encoder reranking under {@code gitcontext.rerank}.
+	 *
+	 * @param enabled whether cross-encoder reranking is enabled (default: false)
+	 * @param modelName local model directory name under data/models/ (default: ms-marco-MiniLM-L-6-v2)
+	 * @param modelUrl download URL for the ONNX model weights (default: Hugging Face Xenova quantized ONNX)
+	 * @param tokenizerUrl download URL for the tokenizer JSON (default: Hugging Face Xenova tokenizer.json)
+	 * @param candidates number of candidate fused results to evaluate with the reranker (default: 30)
+	 * @param maxTextChars maximum character length of chunk text passed to the cross-encoder (default: 1000)
+	 */
+	public record RerankProperties(
+			@DefaultValue("false") boolean enabled,
+			@NotBlank @DefaultValue("ms-marco-MiniLM-L-6-v2") String modelName,
+			@NotBlank @DefaultValue("https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model_quantized.onnx") String modelUrl,
+			@NotBlank @DefaultValue("https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json") String tokenizerUrl,
+			@Min(1) @DefaultValue("30") int candidates,
+			@Min(1) @DefaultValue("1000") int maxTextChars
+	) {
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -455,7 +505,8 @@ public record GitContextProperties(
 				"embedding=" + embedding + ", " +
 				"qdrant=" + qdrant + ", " +
 				"keyword=" + keyword + ", " +
-				"hybrid=" + hybrid +
+				"hybrid=" + hybrid + ", " +
+				"rerank=" + rerank +
 				"]";
 	}
 
@@ -466,7 +517,7 @@ public record GitContextProperties(
 		return "****";
 	}
 
-	private static Path resolveToRepoRoot(Path path) {
+	public static Path resolveToRepoRoot(Path path) {
 		if (path.isAbsolute()) {
 			return path.normalize();
 		}

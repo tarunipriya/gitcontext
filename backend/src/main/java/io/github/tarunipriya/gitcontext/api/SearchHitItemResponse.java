@@ -24,6 +24,8 @@ import java.util.List;
  * @param vectorRank 1-based rank in vector search candidate list (null if absent)
  * @param keywordScore sparse lexical BM25 score from Lucene rounded to 3 decimals (null if absent)
  * @param keywordRank 1-based rank in keyword search candidate list (null if absent)
+ * @param rerankScore cross-encoder relevance score rounded to 4 decimals (null if not reranked)
+ * @param fusedRank 1-based rank in the fused candidate list before reranking (null if not reranked)
  */
 public record SearchHitItemResponse(
 		double score,
@@ -41,8 +43,36 @@ public record SearchHitItemResponse(
 		Double vectorScore,
 		Integer vectorRank,
 		Double keywordScore,
-		Integer keywordRank
+		Integer keywordRank,
+		Double rerankScore,
+		Integer fusedRank
 ) {
+
+	/**
+	 * Backwards-compatible constructor without cross-encoder reranking fields.
+	 */
+	public SearchHitItemResponse(
+			double score,
+			ChunkType chunkType,
+			String symbolName,
+			String parentSymbol,
+			String headingPath,
+			String path,
+			String language,
+			Integer startLine,
+			Integer endLine,
+			String url,
+			String snippet,
+			Double fusedScore,
+			Double vectorScore,
+			Integer vectorRank,
+			Double keywordScore,
+			Integer keywordRank
+	) {
+		this(score, chunkType, symbolName, parentSymbol, headingPath, path, language,
+				startLine, endLine, url, snippet, fusedScore, vectorScore, vectorRank,
+				keywordScore, keywordRank, null, null);
+	}
 
 	/**
 	 * Creates a {@link SearchHitItemResponse} from a {@link HybridSearchHit}.
@@ -59,6 +89,7 @@ public record SearchHitItemResponse(
 		Double roundedFused = round(hybridHit.fusedScore(), 4);
 		Double roundedVector = round(hybridHit.vectorScore(), 3);
 		Double roundedKeyword = round(hybridHit.keywordScore(), 3);
+		Double roundedRerank = round(hybridHit.rerankScore(), 4);
 
 		return new SearchHitItemResponse(
 				roundedScore,
@@ -76,7 +107,9 @@ public record SearchHitItemResponse(
 				roundedVector,
 				hybridHit.vectorRank(),
 				roundedKeyword,
-				hybridHit.keywordRank()
+				hybridHit.keywordRank(),
+				roundedRerank,
+				hybridHit.fusedRank()
 		);
 	}
 
@@ -104,6 +137,8 @@ public record SearchHitItemResponse(
 				null,
 				roundedScore,
 				1,
+				null,
+				null,
 				null,
 				null
 		);

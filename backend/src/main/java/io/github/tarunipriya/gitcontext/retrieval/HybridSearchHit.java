@@ -12,6 +12,8 @@ import java.util.Objects;
  * @param vectorRank 1-based rank in vector search candidate list (null if absent from vector results)
  * @param keywordScore sparse lexical BM25 score from Lucene (null if absent from keyword results)
  * @param keywordRank 1-based rank in keyword search candidate list (null if absent from keyword results)
+ * @param rerankScore cross-encoder relevance score (null if reranking was not performed)
+ * @param fusedRank 1-based rank position in the fused candidate list prior to reranking (null if not reranked)
  */
 public record HybridSearchHit(
 		SearchHit hit,
@@ -19,18 +21,58 @@ public record HybridSearchHit(
 		Double vectorScore,
 		Integer vectorRank,
 		Double keywordScore,
-		Integer keywordRank
+		Integer keywordRank,
+		Double rerankScore,
+		Integer fusedRank
 ) {
 	public HybridSearchHit {
 		Objects.requireNonNull(hit, "hit must not be null");
 	}
 
 	/**
-	 * Returns the primary score to display, preferring fusedScore, then vectorScore, then keywordScore, then hit score.
+	 * Backwards-compatible constructor without reranking fields.
+	 */
+	public HybridSearchHit(
+			SearchHit hit,
+			Double fusedScore,
+			Double vectorScore,
+			Integer vectorRank,
+			Double keywordScore,
+			Integer keywordRank
+	) {
+		this(hit, fusedScore, vectorScore, vectorRank, keywordScore, keywordRank, null, null);
+	}
+
+	/**
+	 * Returns a copy of this hit carrying cross-encoder reranking metadata.
+	 *
+	 * @param score cross-encoder relevance score
+	 * @param rank 1-based fused candidate rank before reranking
+	 * @return updated hybrid search hit
+	 */
+	public HybridSearchHit withRerank(double score, int rank) {
+		return new HybridSearchHit(
+				hit,
+				fusedScore,
+				vectorScore,
+				vectorRank,
+				keywordScore,
+				keywordRank,
+				score,
+				rank
+		);
+	}
+
+	/**
+	 * Returns the primary score to display, preferring rerankScore, then fusedScore, then vectorScore,
+	 * then keywordScore, then hit score.
 	 *
 	 * @return primary relevance score
 	 */
 	public double primaryScore() {
+		if (rerankScore != null) {
+			return rerankScore;
+		}
 		if (fusedScore != null) {
 			return fusedScore;
 		}

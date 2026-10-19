@@ -194,7 +194,14 @@ public class IngestionService {
 			indexedPoints = indexSummary.count();
 			embedMillis = indexSummary.embedMillis();
 			upsertMillis = indexSummary.upsertMillis();
-			vectorStore.deleteStale(repo, runId);
+			try {
+				vectorStore.deleteStale(repo, runId);
+			} catch (Exception e) {
+				String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+				String msg = "Old index entries could not be cleaned up: " + reason;
+				log.warn("Stage [indexing] deleteStale failed: {}", e.getMessage(), e);
+				warnings.add(msg);
+			}
 		} catch (Exception e) {
 			String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 			String msg = "Indexing skipped: " + reason + "; search will not include this run";
