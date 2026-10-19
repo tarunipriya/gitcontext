@@ -1,5 +1,6 @@
 package io.github.tarunipriya.gitcontext.api;
 
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableException;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionQueueFullException;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -57,6 +58,22 @@ public class ApiExceptionHandler {
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
 		problem.setTitle("Resource Not Found");
 		return problem;
+	}
+
+
+
+	/**
+	 * Handles Qdrant vector database unavailability with 503 Service Unavailable and helpful guidance.
+	 */
+	@ExceptionHandler(QdrantUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleQdrantUnavailableException(QdrantUnavailableException ex) {
+		log.warn("Qdrant unavailable: {}", ex.getMessage());
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.SERVICE_UNAVAILABLE,
+				ex.getMessage()
+		);
+		problem.setTitle("Service Unavailable");
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
 	}
 
 	/**

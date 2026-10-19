@@ -134,4 +134,19 @@ class VectorStoreTest {
 		List<Map<String, Object>> must = (List<Map<String, Object>>) filter.get("must");
 		assertThat(must).contains(Map.of("key", "repo", "match", Map.of("value", "testowner/testrepo")));
 	}
+
+	@Test
+	@DisplayName("countRepoPoints queries Qdrant with repo filter")
+	@SuppressWarnings("unchecked")
+	void testCountRepoPoints() {
+		ArgumentCaptor<Map<String, Object>> filterCaptor = ArgumentCaptor.forClass(Map.class);
+		when(qdrantClient.count(eq("gitcontext_chunks"), filterCaptor.capture())).thenReturn(7L);
+
+		long count = vectorStore.countRepoPoints(repo);
+
+		assertThat(count).isEqualTo(7L);
+		Map<String, Object> filter = filterCaptor.getValue();
+		List<Map<String, Object>> must = (List<Map<String, Object>>) filter.get("must");
+		assertThat(must).contains(Map.of("key", "repo", "match", Map.of("value", "testowner/testrepo")));
+	}
 }

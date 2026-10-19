@@ -91,7 +91,10 @@ public class IngestionJobService {
 		jobs.computeIfPresent(jobId, (id, current) -> current.withRunning(Instant.now()));
 
 		try {
-			IngestionResult result = ingestionService.ingest(repo);
+			IngestionResult result = ingestionService.ingest(repo, jobId.toString());
+			if (result == null) {
+				result = ingestionService.ingest(repo);
+			}
 			String summary = String.format("Ingested %d documents in %d ms (warnings: %d)",
 					result.documents().size(), result.totalDurationMillis(), result.warnings().size());
 			jobs.computeIfPresent(jobId, (id, current) -> current.withCompleted(Instant.now(), summary));

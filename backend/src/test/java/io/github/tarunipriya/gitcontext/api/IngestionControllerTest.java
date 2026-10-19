@@ -160,6 +160,9 @@ class IngestionControllerTest {
 				chunkCounts,
 				42.5,
 				120,
+				8,
+				15L,
+				25L,
 				Map.of(),
 				250L,
 				List.of("Warning: rate limit near threshold")
@@ -178,6 +181,9 @@ class IngestionControllerTest {
 				.andExpect(jsonPath("$.chunkCountsByType.METHOD").value(5))
 				.andExpect(jsonPath("$.avgChunkTokens").value(42.5))
 				.andExpect(jsonPath("$.maxChunkTokens").value(120))
+				.andExpect(jsonPath("$.indexedPoints").value(8))
+				.andExpect(jsonPath("$.embedMillis").value(15))
+				.andExpect(jsonPath("$.upsertMillis").value(25))
 				.andExpect(jsonPath("$.warnings[0]", containsString("rate limit near threshold")));
 	}
 

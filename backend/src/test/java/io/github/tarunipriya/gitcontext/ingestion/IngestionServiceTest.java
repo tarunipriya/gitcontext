@@ -1,12 +1,9 @@
 package io.github.tarunipriya.gitcontext.ingestion;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
-
 import io.github.tarunipriya.gitcontext.chunking.ChunkingService;
+import io.github.tarunipriya.gitcontext.indexing.IndexSummary;
+import io.github.tarunipriya.gitcontext.indexing.VectorStore;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableException;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
 import io.github.tarunipriya.gitcontext.ingestion.github.GitHubApiException;
 import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
@@ -29,6 +26,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
 @ExtendWith(MockitoExtension.class)
 class IngestionServiceTest {
 
@@ -50,6 +56,9 @@ class IngestionServiceTest {
 	@Mock
 	private ChunkingService chunkingService;
 
+	@Mock
+	private VectorStore vectorStore;
+
 	private IngestionService ingestionService;
 	private final RepoRef repoRef = new RepoRef("testowner", "testrepo");
 
@@ -61,7 +70,8 @@ class IngestionServiceTest {
 				commitIngestor,
 				pullRequestIngestor,
 				issueIngestor,
-				chunkingService
+				chunkingService,
+				vectorStore
 		);
 	}
 
@@ -88,6 +98,7 @@ class IngestionServiceTest {
 		Chunk chunk2 = Chunk.of("doc2", 0, "chunk 2 text", "chunk 2 content",
 				ChunkMetadata.from(codeDoc2.metadata(), ChunkType.METHOD, 50, "util", "Util", null, 5, 20));
 		when(chunkingService.chunkAll(any())).thenReturn(List.of(chunk1, chunk2));
+		when(vectorStore.index(eq(repoRef), any(), any())).thenReturn(new IndexSummary(2, 12L, 24L));
 
 		IngestionResult result = ingestionService.ingest(repoRef);
 
@@ -107,9 +118,52 @@ class IngestionServiceTest {
 		assertThat(result.avgChunkTokens()).isEqualTo(40.0);
 		assertThat(result.maxChunkTokens()).isEqualTo(50);
 
+		// Indexing metrics
+		assertThat(result.indexedPoints()).isEqualTo(2);
+		assertThat(result.embedMillis()).isEqualTo(12L);
+		assertThat(result.upsertMillis()).isEqualTo(24L);
+		verify(vectorStore).index(eq(repoRef), any(), eq(List.of(chunk1, chunk2)));
+		verify(vectorStore).deleteStale(eq(repoRef), any());
+
 		assertThat(result.warnings()).isEmpty();
-		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues", "chunking");
+		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues", "chunking", "indexing");
 		assertThat(result.totalDurationMillis()).isGreaterThanOrEqualTo(0);
+	}
+
+	@Test
+	@DisplayName("Indexing failure becomes a warning, preserves chunks, and deleteStale is NOT called")
+	void indexingFailure_becomesWarningAndPreservesChunksAndSkipsDeleteStale() {
+		String headSha = "0123456789abcdef0123456789abcdef01234567";
+		ClonedRepo clonedRepo = new ClonedRepo(repoRef, Path.of("mock/path"), headSha, "main");
+		when(repositoryCloner.cloneOrUpdate(repoRef)).thenReturn(clonedRepo);
+
+		Document codeDoc = createDoc(SourceType.CODE, "src/App.java", "code 1");
+		when(fileIngestor.ingest(clonedRepo)).thenReturn(List.of(codeDoc));
+		when(commitIngestor.ingest(clonedRepo)).thenReturn(List.of());
+		when(pullRequestIngestor.ingest(repoRef)).thenReturn(List.of());
+		when(issueIngestor.ingest(repoRef)).thenReturn(List.of());
+
+		Chunk chunk = Chunk.of("doc1", 0, "chunk 1 text", "chunk 1 content",
+				ChunkMetadata.from(codeDoc.metadata(), ChunkType.CLASS, 30, "App", null, null, 1, 10));
+		when(chunkingService.chunkAll(any())).thenReturn(List.of(chunk));
+
+		when(vectorStore.index(eq(repoRef), any(), any()))
+				.thenThrow(new QdrantUnavailableException("http://localhost:6333", new RuntimeException("Connection refused")));
+
+		IngestionResult result = ingestionService.ingest(repoRef);
+
+		assertThat(result.documents()).containsExactly(codeDoc);
+		assertThat(result.chunks()).containsExactly(chunk);
+		assertThat(result.indexedPoints()).isZero();
+		assertThat(result.embedMillis()).isZero();
+		assertThat(result.upsertMillis()).isZero();
+		assertThat(result.warnings()).hasSize(1);
+		assertThat(result.warnings().getFirst())
+				.contains("Indexing skipped:")
+				.contains("search will not include this run");
+
+		verify(vectorStore).index(eq(repoRef), any(), eq(List.of(chunk)));
+		verify(vectorStore, never()).deleteStale(any(), any());
 	}
 
 	@Test
@@ -126,6 +180,7 @@ class IngestionServiceTest {
 		when(issueIngestor.ingest(repoRef)).thenReturn(List.of());
 
 		when(chunkingService.chunkAll(any())).thenThrow(new RuntimeException("Tree-sitter unexpected parser panic"));
+		when(vectorStore.index(eq(repoRef), any(), any())).thenReturn(new IndexSummary(0, 0L, 0L));
 
 		IngestionResult result = ingestionService.ingest(repoRef);
 
@@ -154,6 +209,7 @@ class IngestionServiceTest {
 		when(pullRequestIngestor.ingest(repoRef)).thenThrow(new GitHubApiException(403, "GitHub API rate limit exceeded"));
 		when(issueIngestor.ingest(repoRef)).thenReturn(List.of(issueDoc));
 		when(chunkingService.chunkAll(any())).thenReturn(List.of());
+		when(vectorStore.index(eq(repoRef), any(), any())).thenReturn(new IndexSummary(0, 0L, 0L));
 
 		IngestionResult result = ingestionService.ingest(repoRef);
 

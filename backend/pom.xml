@@ -97,13 +97,13 @@
 		<!-- Testcontainers JUnit Jupiter integration for container lifecycle in tests -->
 		<dependency>
 			<groupId>org.testcontainers</groupId>
-			<artifactId>junit-jupiter</artifactId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<!-- Testcontainers Qdrant module for running Qdrant vector database containers in tests -->
 		<dependency>
 			<groupId>org.testcontainers</groupId>
-			<artifactId>qdrant</artifactId>
+			<artifactId>testcontainers-qdrant</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -115,14 +115,6 @@
 				<groupId>dev.langchain4j</groupId>
 				<artifactId>langchain4j-bom</artifactId>
 				<version>1.22.0</version>
-				<type>pom</type>
-				<scope>import</scope>
-			</dependency>
-			<!-- Testcontainers BOM managing versions for integration test containers -->
-			<dependency>
-				<groupId>org.testcontainers</groupId>
-				<artifactId>testcontainers-bom</artifactId>
-				<version>1.20.6</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>

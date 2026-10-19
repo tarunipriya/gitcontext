@@ -21,6 +21,9 @@ import java.util.Objects;
  * @param chunkCountsByType chunk counts grouped by {@link ChunkType}
  * @param avgChunkTokens average token count across all chunks (0.0 if empty)
  * @param maxChunkTokens maximum token count observed across chunks (0 if empty)
+ * @param indexedPoints total points successfully indexed into vector store
+ * @param embedMillis duration in milliseconds for embedding chunks
+ * @param upsertMillis duration in milliseconds for upserting points into Qdrant
  * @param stageDurationsMillis execution duration in milliseconds for each ingestion stage
  * @param totalDurationMillis total elapsed execution time in milliseconds
  * @param warnings non-fatal warnings encountered during ingestion (e.g. GitHub API errors)
@@ -35,6 +38,9 @@ public record IngestionResult(
 		Map<ChunkType, Integer> chunkCountsByType,
 		double avgChunkTokens,
 		int maxChunkTokens,
+		int indexedPoints,
+		long embedMillis,
+		long upsertMillis,
 		Map<String, Long> stageDurationsMillis,
 		long totalDurationMillis,
 		List<String> warnings,
@@ -57,7 +63,29 @@ public record IngestionResult(
 	}
 
 	/**
-	 * Convenience constructor defaulting {@code ingestedAt} to now.
+	 * Convenience constructor with indexing metrics defaulting {@code ingestedAt} to now.
+	 */
+	public IngestionResult(
+			RepoRef repo,
+			String headCommitSha,
+			List<Document> documents,
+			Map<SourceType, Integer> countsBySourceType,
+			List<Chunk> chunks,
+			Map<ChunkType, Integer> chunkCountsByType,
+			double avgChunkTokens,
+			int maxChunkTokens,
+			int indexedPoints,
+			long embedMillis,
+			long upsertMillis,
+			Map<String, Long> stageDurationsMillis,
+			long totalDurationMillis,
+			List<String> warnings
+	) {
+		this(repo, headCommitSha, documents, countsBySourceType, chunks, chunkCountsByType, avgChunkTokens, maxChunkTokens, indexedPoints, embedMillis, upsertMillis, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+	}
+
+	/**
+	 * Convenience constructor without indexing metrics defaulting them to zero and {@code ingestedAt} to now.
 	 */
 	public IngestionResult(
 			RepoRef repo,
@@ -72,7 +100,7 @@ public record IngestionResult(
 			long totalDurationMillis,
 			List<String> warnings
 	) {
-		this(repo, headCommitSha, documents, countsBySourceType, chunks, chunkCountsByType, avgChunkTokens, maxChunkTokens, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+		this(repo, headCommitSha, documents, countsBySourceType, chunks, chunkCountsByType, avgChunkTokens, maxChunkTokens, 0, 0L, 0L, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
 	}
 
 	/**
@@ -88,7 +116,7 @@ public record IngestionResult(
 			List<String> warnings,
 			Instant ingestedAt
 	) {
-		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, stageDurationsMillis, totalDurationMillis, warnings, ingestedAt);
+		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, 0, 0L, 0L, stageDurationsMillis, totalDurationMillis, warnings, ingestedAt);
 	}
 
 	/**
@@ -103,7 +131,7 @@ public record IngestionResult(
 			long totalDurationMillis,
 			List<String> warnings
 	) {
-		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
+		this(repo, headCommitSha, documents, countsBySourceType, List.of(), Map.of(), 0.0, 0, 0, 0L, 0L, stageDurationsMillis, totalDurationMillis, warnings, Instant.now());
 	}
 
 	/**
