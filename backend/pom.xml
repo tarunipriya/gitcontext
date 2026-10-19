@@ -15,6 +15,7 @@
 	<description>GitContext backend service for repository indexing, AST chunking, hybrid retrieval, and generation</description>
 	<properties>
 		<java.version>25</java.version>
+		<lucene.version>10.2.0</lucene.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -92,6 +93,22 @@
 		<dependency>
 			<groupId>dev.langchain4j</groupId>
 			<artifactId>langchain4j-embeddings-bge-small-en-v15-q</artifactId>
+		</dependency>
+		<!-- Apache Lucene for BM25 keyword search, AST symbol matching, and hybrid retrieval -->
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-core</artifactId>
+			<version>${lucene.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-analysis-common</artifactId>
+			<version>${lucene.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-queryparser</artifactId>
+			<version>${lucene.version}</version>
 		</dependency>
 
 		<!-- Testcontainers JUnit Jupiter integration for container lifecycle in tests -->

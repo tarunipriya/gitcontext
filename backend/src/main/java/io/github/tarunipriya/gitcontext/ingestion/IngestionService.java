@@ -12,6 +12,7 @@ import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.Document;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -40,6 +41,7 @@ public class IngestionService {
 	private final IssueIngestor issueIngestor;
 	private final ChunkingService chunkingService;
 	private final VectorStore vectorStore;
+	private final KeywordIndex keywordIndex;
 
 	/**
 	 * Creates a new {@link IngestionService} with all required stage ingestors.
@@ -51,6 +53,7 @@ public class IngestionService {
 	 * @param issueIngestor GitHub issue ingestor
 	 * @param chunkingService document chunking service
 	 * @param vectorStore vector store indexing facade
+	 * @param keywordIndex Lucene BM25 keyword index facade
 	 */
 	public IngestionService(
 			RepositoryCloner repositoryCloner,
@@ -59,7 +62,8 @@ public class IngestionService {
 			PullRequestIngestor pullRequestIngestor,
 			IssueIngestor issueIngestor,
 			ChunkingService chunkingService,
-			VectorStore vectorStore
+			VectorStore vectorStore,
+			KeywordIndex keywordIndex
 	) {
 		this.repositoryCloner = Objects.requireNonNull(repositoryCloner, "repositoryCloner must not be null");
 		this.fileIngestor = Objects.requireNonNull(fileIngestor, "fileIngestor must not be null");
@@ -68,6 +72,7 @@ public class IngestionService {
 		this.issueIngestor = Objects.requireNonNull(issueIngestor, "issueIngestor must not be null");
 		this.chunkingService = Objects.requireNonNull(chunkingService, "chunkingService must not be null");
 		this.vectorStore = Objects.requireNonNull(vectorStore, "vectorStore must not be null");
+		this.keywordIndex = Objects.requireNonNull(keywordIndex, "keywordIndex must not be null");
 	}
 
 	/**
@@ -200,6 +205,20 @@ public class IngestionService {
 		stageDurations.put("indexing", indexDuration);
 		log.info("Stage [indexing] completed with {} points in {} ms (embed: {} ms, upsert: {} ms)",
 				indexedPoints, indexDuration, embedMillis, upsertMillis);
+
+		// Stage 8: Keyword Indexing (non-fatal)
+		long keywordIndexStart = System.currentTimeMillis();
+		try {
+			keywordIndex.build(repo, chunks);
+		} catch (Exception e) {
+			String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+			String msg = "Keyword indexing skipped: " + reason;
+			log.warn("Stage [keywordIndexing] failed: {}", e.getMessage(), e);
+			warnings.add(msg);
+		}
+		long keywordIndexDuration = System.currentTimeMillis() - keywordIndexStart;
+		stageDurations.put("keywordIndexing", keywordIndexDuration);
+		log.info("Stage [keywordIndexing] completed in {} ms", keywordIndexDuration);
 
 		// Counts by SourceType
 		Map<SourceType, Integer> counts = new EnumMap<>(SourceType.class);

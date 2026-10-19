@@ -59,6 +59,9 @@ class IngestionServiceTest {
 	@Mock
 	private VectorStore vectorStore;
 
+	@Mock
+	private io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex keywordIndex;
+
 	private IngestionService ingestionService;
 	private final RepoRef repoRef = new RepoRef("testowner", "testrepo");
 
@@ -71,7 +74,8 @@ class IngestionServiceTest {
 				pullRequestIngestor,
 				issueIngestor,
 				chunkingService,
-				vectorStore
+				vectorStore,
+				keywordIndex
 		);
 	}
 
@@ -124,9 +128,10 @@ class IngestionServiceTest {
 		assertThat(result.upsertMillis()).isEqualTo(24L);
 		verify(vectorStore).index(eq(repoRef), any(), eq(List.of(chunk1, chunk2)));
 		verify(vectorStore).deleteStale(eq(repoRef), any());
+		verify(keywordIndex).build(eq(repoRef), eq(List.of(chunk1, chunk2)));
 
 		assertThat(result.warnings()).isEmpty();
-		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues", "chunking", "indexing");
+		assertThat(result.stageDurationsMillis()).containsKeys("clone", "files", "commits", "pullRequests", "issues", "chunking", "indexing", "keywordIndexing");
 		assertThat(result.totalDurationMillis()).isGreaterThanOrEqualTo(0);
 	}
 
@@ -231,7 +236,37 @@ class IngestionServiceTest {
 				.isInstanceOf(RuntimeException.class)
 				.hasMessageContaining("Git clone failed");
 
-		verifyNoInteractions(fileIngestor, commitIngestor, pullRequestIngestor, issueIngestor, chunkingService);
+		verifyNoInteractions(fileIngestor, commitIngestor, pullRequestIngestor, issueIngestor, chunkingService, vectorStore, keywordIndex);
+	}
+
+	@Test
+	@DisplayName("Keyword indexing failure is caught, added as warning, and does not fail ingestion")
+	void keywordIndexingFailure_becomesWarningAndPreservesIngestion() {
+		String headSha = "0123456789abcdef0123456789abcdef01234567";
+		ClonedRepo clonedRepo = new ClonedRepo(repoRef, Path.of("mock/path"), headSha, "main");
+		when(repositoryCloner.cloneOrUpdate(repoRef)).thenReturn(clonedRepo);
+
+		Document codeDoc = createDoc(SourceType.CODE, "src/App.java", "code 1");
+		when(fileIngestor.ingest(clonedRepo)).thenReturn(List.of(codeDoc));
+		when(commitIngestor.ingest(clonedRepo)).thenReturn(List.of());
+		when(pullRequestIngestor.ingest(repoRef)).thenReturn(List.of());
+		when(issueIngestor.ingest(repoRef)).thenReturn(List.of());
+
+		Chunk chunk = Chunk.of("doc1", 0, "chunk 1 text", "chunk 1 content",
+				ChunkMetadata.from(codeDoc.metadata(), ChunkType.CLASS, 30, "App", null, null, 1, 10));
+		when(chunkingService.chunkAll(any())).thenReturn(List.of(chunk));
+		when(vectorStore.index(eq(repoRef), any(), any())).thenReturn(new IndexSummary(1, 10L, 20L));
+
+		org.mockito.Mockito.doThrow(new RuntimeException("Lucene index write failed"))
+				.when(keywordIndex).build(eq(repoRef), any());
+
+		IngestionResult result = ingestionService.ingest(repoRef);
+
+		assertThat(result.documents()).containsExactly(codeDoc);
+		assertThat(result.chunks()).containsExactly(chunk);
+		assertThat(result.warnings()).hasSize(1);
+		assertThat(result.warnings().getFirst()).contains("Keyword indexing skipped: Lucene index write failed");
+		assertThat(result.stageDurationsMillis()).containsKey("keywordIndexing");
 	}
 
 	private Document createDoc(SourceType sourceType, String key, String content) {

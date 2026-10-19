@@ -2,15 +2,19 @@ package io.github.tarunipriya.gitcontext.api;
 
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
 import io.github.tarunipriya.gitcontext.indexing.SearchHit;
-import io.github.tarunipriya.gitcontext.indexing.VectorSearchResult;
 import io.github.tarunipriya.gitcontext.indexing.VectorStore;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableException;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
-import java.nio.file.Path;
+import io.github.tarunipriya.gitcontext.retrieval.HybridSearchHit;
+import io.github.tarunipriya.gitcontext.retrieval.HybridSearchResult;
+import io.github.tarunipriya.gitcontext.retrieval.HybridSearchService;
+import io.github.tarunipriya.gitcontext.retrieval.SearchMode;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +25,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -35,19 +38,35 @@ class SearchControllerTest {
 	private MockMvc mockMvc;
 
 	@MockitoBean
+	private HybridSearchService hybridSearchService;
+
+	@MockitoBean
 	private VectorStore vectorStore;
+
+	@MockitoBean
+	private KeywordIndex keywordIndex;
 
 	@MockitoBean
 	private GitContextProperties properties;
 
 	private final RepoRef testRepo = new RepoRef("testowner", "testrepo");
 
+	@BeforeEach
+	void setUp() {
+		GitContextProperties.HybridProperties hybridConfig = new GitContextProperties.HybridProperties(
+				50,
+				60,
+				SearchMode.HYBRID
+		);
+		when(properties.hybrid()).thenReturn(hybridConfig);
+	}
+
 	@Test
 	@DisplayName("GET /search happy path returns mapped response with 3-decimal score, snippet, and timings")
 	void search_happyPath_returnsMappedResponse() throws Exception {
 		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(5L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
 
-		// Multi-line chunk content to test snippet limiting to 20 lines
 		StringBuilder contentBuilder = new StringBuilder();
 		for (int i = 1; i <= 25; i++) {
 			contentBuilder.append("line ").append(i).append("\n");
@@ -78,19 +97,32 @@ class SearchControllerTest {
 				rawContent
 		);
 
-		VectorSearchResult searchResult = new VectorSearchResult(
-				List.of(hit),
+		HybridSearchHit hybridHit = new HybridSearchHit(
+				hit,
+				0.0325,
+				0.8523,
+				1,
+				15.42,
+				2
+		);
+
+		HybridSearchResult searchResult = new HybridSearchResult(
+				List.of(hybridHit),
+				SearchMode.HYBRID,
+				List.of("A minor warning"),
 				15L,
-				20L,
+				10L,
+				5L,
 				40L
 		);
 
-		when(vectorStore.searchWithTimings(
+		when(hybridSearchService.search(
 				eq(testRepo),
 				eq("how to handle rate limits"),
 				eq(5),
 				eq(Set.of(ChunkType.METHOD, ChunkType.CLASS)),
-				eq("src/main")
+				eq("src/main"),
+				eq(SearchMode.HYBRID)
 		)).thenReturn(searchResult);
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
@@ -101,11 +133,19 @@ class SearchControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.query").value("how to handle rate limits"))
 				.andExpect(jsonPath("$.k").value(5))
+				.andExpect(jsonPath("$.mode").value("HYBRID"))
 				.andExpect(jsonPath("$.tookMillis").value(40))
-				.andExpect(jsonPath("$.embedMillis").value(15))
-				.andExpect(jsonPath("$.searchMillis").value(20))
+				.andExpect(jsonPath("$.vectorMillis").value(15))
+				.andExpect(jsonPath("$.keywordMillis").value(10))
+				.andExpect(jsonPath("$.fusionMillis").value(5))
+				.andExpect(jsonPath("$.warnings[0]").value("A minor warning"))
 				.andExpect(jsonPath("$.hits").isArray())
-				.andExpect(jsonPath("$.hits[0].score").value(0.852))
+				.andExpect(jsonPath("$.hits[0].score").value(0.033))
+				.andExpect(jsonPath("$.hits[0].fusedScore").value(0.0325))
+				.andExpect(jsonPath("$.hits[0].vectorScore").value(0.852))
+				.andExpect(jsonPath("$.hits[0].vectorRank").value(1))
+				.andExpect(jsonPath("$.hits[0].keywordScore").value(15.42))
+				.andExpect(jsonPath("$.hits[0].keywordRank").value(2))
 				.andExpect(jsonPath("$.hits[0].chunkType").value("METHOD"))
 				.andExpect(jsonPath("$.hits[0].symbolName").value("handleRateLimits"))
 				.andExpect(jsonPath("$.hits[0].parentSymbol").value("GitHubClient"))
@@ -117,6 +157,33 @@ class SearchControllerTest {
 				.andExpect(jsonPath("$.hits[0].url").value("https://github.com/testowner/testrepo/blob/main/src/main/java/GitHubClient.java#L10-L25"))
 				.andExpect(jsonPath("$.hits[0].snippet").value(containsString("line 1")))
 				.andExpect(jsonPath("$.hits[0].snippet").value(containsString("line 20")));
+	}
+
+	@Test
+	@DisplayName("GET /search accepts valid mode parameter case-insensitively")
+	void search_modeParamValid_parsesCaseInsensitively() throws Exception {
+		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(10L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
+
+		when(hybridSearchService.search(eq(testRepo), eq("test query"), eq(10), any(), any(), eq(SearchMode.KEYWORD)))
+				.thenReturn(new HybridSearchResult(List.of(), SearchMode.KEYWORD, List.of(), 0L, 5L, 0L, 10L));
+
+		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
+						.param("q", "test query")
+						.param("mode", "keyword"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.mode").value("KEYWORD"));
+	}
+
+	@Test
+	@DisplayName("GET /search returns 400 when mode parameter is invalid, listing allowed values")
+	void search_modeParamInvalid_returns400WithAllowedValues() throws Exception {
+		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
+						.param("q", "test query")
+						.param("mode", "unsupported_mode"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail").value(containsString("Unknown search mode: 'unsupported_mode'")))
+				.andExpect(jsonPath("$.detail").value(containsString("Allowed values are: [VECTOR, KEYWORD, HYBRID]")));
 	}
 
 	@Test
@@ -178,9 +245,10 @@ class SearchControllerTest {
 	}
 
 	@Test
-	@DisplayName("GET /search returns 404 ProblemDetail when repository has zero points in Qdrant")
-	void search_zeroPointsInQdrant_returns404() throws Exception {
+	@DisplayName("GET /search returns 404 ProblemDetail when repository exists in neither index")
+	void search_zeroPointsInNeitherIndex_returns404() throws Exception {
 		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(0L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(false);
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
 						.param("q", "valid query"))
@@ -190,16 +258,34 @@ class SearchControllerTest {
 	}
 
 	@Test
-	@DisplayName("GET /search returns 503 ProblemDetail when Qdrant is unavailable")
-	void search_qdrantUnavailable_returns503WithHelpfulMessage() throws Exception {
+	@DisplayName("GET /search returns 503 ProblemDetail when VECTOR mode is requested and Qdrant is unavailable")
+	void search_qdrantUnavailableInVectorMode_returns503WithHelpfulMessage() throws Exception {
 		when(vectorStore.countRepoPoints(eq(testRepo)))
 				.thenThrow(new QdrantUnavailableException("http://localhost:6333", new RuntimeException("connection refused")));
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
-						.param("q", "valid query"))
+						.param("q", "valid query")
+						.param("mode", "VECTOR"))
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.title").value("Service Unavailable"))
 				.andExpect(jsonPath("$.detail").value(containsString("docker compose up -d")));
+	}
+
+	@Test
+	@DisplayName("GET /search succeeds with KEYWORD mode when keyword index exists even if Qdrant is unavailable")
+	void search_qdrantUnavailableInKeywordMode_succeedsIfKeywordIndexExists() throws Exception {
+		when(vectorStore.countRepoPoints(eq(testRepo)))
+				.thenThrow(new QdrantUnavailableException("http://localhost:6333", new RuntimeException("connection refused")));
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
+
+		when(hybridSearchService.search(eq(testRepo), eq("valid query"), eq(10), any(), any(), eq(SearchMode.KEYWORD)))
+				.thenReturn(new HybridSearchResult(List.of(), SearchMode.KEYWORD, List.of(), 0L, 12L, 0L, 15L));
+
+		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
+						.param("q", "valid query")
+						.param("mode", "KEYWORD"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.mode").value("KEYWORD"));
 	}
 
 	@Test
@@ -207,8 +293,9 @@ class SearchControllerTest {
 	void search_caseInsensitiveRepo_queriesNormalizedRepo() throws Exception {
 		RepoRef mixedCaseRepo = new RepoRef("TestOwner", "TestRepo");
 		when(vectorStore.countRepoPoints(eq(mixedCaseRepo))).thenReturn(2L);
-		when(vectorStore.searchWithTimings(eq(mixedCaseRepo), eq("test query"), eq(10), eq(Set.of()), any()))
-				.thenReturn(new VectorSearchResult(List.of(), 5L, 10L, 18L));
+		when(keywordIndex.exists(eq(mixedCaseRepo))).thenReturn(true);
+		when(hybridSearchService.search(eq(mixedCaseRepo), eq("test query"), eq(10), eq(Set.of()), any(), eq(SearchMode.HYBRID)))
+				.thenReturn(new HybridSearchResult(List.of(), SearchMode.HYBRID, List.of(), 5L, 5L, 2L, 18L));
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "TestOwner", "TestRepo")
 						.param("q", "test query"))

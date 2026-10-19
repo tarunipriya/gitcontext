@@ -1,5 +1,6 @@
 package io.github.tarunipriya.gitcontext.config;
 
+import io.github.tarunipriya.gitcontext.retrieval.SearchMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -39,6 +40,8 @@ import org.springframework.validation.annotation.Validated;
  * @param chunking chunking configuration for AST and fallback window chunkers
  * @param embedding embedding configuration for local vector model inference
  * @param qdrant Qdrant vector database configuration
+ * @param keyword Lucene BM25 keyword index configuration
+ * @param hybrid hybrid search and rank fusion configuration
  */
 @Validated
 @ConfigurationProperties(prefix = "gitcontext")
@@ -51,7 +54,9 @@ public record GitContextProperties(
 		@Valid @DefaultValue GitHubProperties github,
 		@Valid @DefaultValue ChunkingProperties chunking,
 		@Valid @DefaultValue EmbeddingProperties embedding,
-		@Valid @DefaultValue QdrantProperties qdrant
+		@Valid @DefaultValue QdrantProperties qdrant,
+		@Valid @DefaultValue KeywordProperties keyword,
+		@Valid @DefaultValue HybridProperties hybrid
 ) {
 
 	/**
@@ -84,6 +89,23 @@ public record GitContextProperties(
 			int effectiveTimeout = qdrant.timeoutSeconds() > 0 ? qdrant.timeoutSeconds() : 30;
 			qdrant = new QdrantProperties(effectiveUrl, effectiveCollection, effectiveBatch, effectiveTimeout);
 		}
+		if (keyword == null) {
+			keyword = new KeywordProperties(null, 3.0, 1.5, 1.0);
+		} else {
+			Path effectiveDir = resolveToRepoRoot(keyword.indexDir() != null ? keyword.indexDir() : Path.of("./data/lucene"));
+			double sb = keyword.symbolBoost() >= 0 ? keyword.symbolBoost() : 3.0;
+			double psb = keyword.parentSymbolBoost() >= 0 ? keyword.parentSymbolBoost() : 1.5;
+			double pb = keyword.pathBoost() >= 0 ? keyword.pathBoost() : 1.0;
+			keyword = new KeywordProperties(effectiveDir, sb, psb, pb);
+		}
+		if (hybrid == null) {
+			hybrid = new HybridProperties(50, 60, SearchMode.HYBRID);
+		} else {
+			int c = hybrid.candidates() > 0 ? hybrid.candidates() : 50;
+			int k = hybrid.rrfK() > 0 ? hybrid.rrfK() : 60;
+			SearchMode m = hybrid.defaultMode() != null ? hybrid.defaultMode() : SearchMode.HYBRID;
+			hybrid = new HybridProperties(c, k, m);
+		}
 	}
 
 	/**
@@ -98,7 +120,7 @@ public record GitContextProperties(
 			GitHubProperties github,
 			ChunkingProperties chunking
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, null, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, null, null, null, null);
 	}
 
 	/**
@@ -112,7 +134,7 @@ public record GitContextProperties(
 			IngestionProperties ingestion,
 			GitHubProperties github
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null, null, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, null, null, null, null, null);
 	}
 
 	/**
@@ -350,6 +372,59 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for Lucene BM25 keyword index under {@code gitcontext.keyword}.
+	 *
+	 * @param indexDir directory path where Lucene indexes are stored (defaults to {@code ./data/lucene} relative to repo root)
+	 * @param symbolBoost BM25 query boost for AST symbol names (default: 3.0)
+	 * @param parentSymbolBoost BM25 query boost for parent symbol names (default: 1.5)
+	 * @param pathBoost BM25 query boost for file paths (default: 1.0)
+	 */
+	public record KeywordProperties(
+			@DefaultValue("./data/lucene") Path indexDir,
+			@Min(0) @DefaultValue("3.0") double symbolBoost,
+			@Min(0) @DefaultValue("1.5") double parentSymbolBoost,
+			@Min(0) @DefaultValue("1.0") double pathBoost
+	) {
+		public KeywordProperties {
+			indexDir = resolveToRepoRoot(indexDir != null ? indexDir : Path.of("./data/lucene"));
+			if (symbolBoost < 0) {
+				symbolBoost = 3.0;
+			}
+			if (parentSymbolBoost < 0) {
+				parentSymbolBoost = 1.5;
+			}
+			if (pathBoost < 0) {
+				pathBoost = 1.0;
+			}
+		}
+	}
+
+	/**
+	 * Configuration properties for hybrid retrieval and rank fusion under {@code gitcontext.hybrid}.
+	 *
+	 * @param candidates number of candidate results fetched from each retriever before rank fusion (default: 50)
+	 * @param rrfK smoothing constant k for Reciprocal Rank Fusion scoring (default: 60)
+	 * @param defaultMode default search mode when not explicitly requested (default: HYBRID)
+	 */
+	public record HybridProperties(
+			@Min(1) @DefaultValue("50") int candidates,
+			@Min(1) @DefaultValue("60") int rrfK,
+			@NotNull @DefaultValue("HYBRID") SearchMode defaultMode
+	) {
+		public HybridProperties {
+			if (candidates <= 0) {
+				candidates = 50;
+			}
+			if (rrfK <= 0) {
+				rrfK = 60;
+			}
+			if (defaultMode == null) {
+				defaultMode = SearchMode.HYBRID;
+			}
+		}
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -378,7 +453,9 @@ public record GitContextProperties(
 				"github=" + github + ", " +
 				"chunking=" + chunking + ", " +
 				"embedding=" + embedding + ", " +
-				"qdrant=" + qdrant +
+				"qdrant=" + qdrant + ", " +
+				"keyword=" + keyword + ", " +
+				"hybrid=" + hybrid +
 				"]";
 	}
 
