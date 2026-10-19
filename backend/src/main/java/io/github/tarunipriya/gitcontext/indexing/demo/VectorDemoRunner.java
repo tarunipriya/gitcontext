@@ -2,7 +2,7 @@ package io.github.tarunipriya.gitcontext.indexing.demo;
 
 import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionService;
-import io.github.tarunipriya.gitcontext.indexing.IndexSummary;
+
 import io.github.tarunipriya.gitcontext.indexing.SearchHit;
 import io.github.tarunipriya.gitcontext.indexing.VectorStore;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
@@ -65,17 +65,11 @@ public class VectorDemoRunner implements CommandLineRunner {
 		RepoRef repoRef = RepoRef.parse(demoRepoString);
 		IngestionResult ingestionResult = ingestionService.ingest(repoRef);
 
-		String runId = "run-" + System.currentTimeMillis();
-		log.info("Indexing ingested chunks into Qdrant with runId: {}", runId);
-
-		IndexSummary summary = vectorStore.index(repoRef, runId, ingestionResult.chunks());
-		vectorStore.deleteStale(repoRef, runId);
-
 		log.info("---------------- Indexing Performance ----------------");
-		log.info("Total Points Indexed: {}", summary.count());
-		log.info("Embedding Duration:   {} ms", summary.embedMillis());
-		log.info("Upsert Duration:      {} ms", summary.upsertMillis());
-		log.info("Total Duration:       {} ms", summary.embedMillis() + summary.upsertMillis());
+		log.info("Total Points Indexed: {}", ingestionResult.indexedPoints());
+		log.info("Embedding Duration:   {} ms", ingestionResult.embedMillis());
+		log.info("Upsert Duration:      {} ms", ingestionResult.upsertMillis());
+		log.info("Total Duration:       {} ms", ingestionResult.embedMillis() + ingestionResult.upsertMillis());
 
 		log.info("---------------- Evaluating Vector Similarity Search Queries ----------------");
 

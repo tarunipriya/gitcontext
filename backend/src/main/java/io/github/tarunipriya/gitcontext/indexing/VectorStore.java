@@ -2,6 +2,7 @@ package io.github.tarunipriya.gitcontext.indexing;
 
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantClient;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantException;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantPoint;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantScoredPoint;
 import io.github.tarunipriya.gitcontext.model.Chunk;
@@ -17,6 +18,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * High-level facade for indexing chunk vectors into Qdrant and executing filtered similarity searches.
@@ -107,16 +109,44 @@ public class VectorStore {
 	 * @param k maximum number of hits to return
 	 * @param types optional filter for structural chunk types (null or empty for all)
 	 * @param pathPrefix optional file path prefix filter (client-side applied)
+
+
+	/**
+	 * Searches the vector store for chunks matching the query string within the specified repository.
+	 *
+	 * @param repo repository to query
+	 * @param query search query or question
+	 * @param k maximum number of hits to return
+	 * @param types optional filter for structural chunk types (null or empty for all)
+	 * @param pathPrefix optional file path prefix filter (client-side applied)
 	 * @return list of search hits sorted in descending order of similarity score
 	 */
 	public List<SearchHit> search(RepoRef repo, String query, int k, Set<ChunkType> types, String pathPrefix) {
+		return searchWithTimings(repo, query, k, types, pathPrefix).hits();
+	}
+
+	/**
+	 * Searches the vector store for chunks matching the query string and returns hit results alongside execution timings.
+	 *
+	 * @param repo repository to query
+	 * @param query search query or question
+	 * @param k maximum number of hits to return
+	 * @param types optional filter for structural chunk types (null or empty for all)
+	 * @param pathPrefix optional file path prefix filter (client-side applied)
+	 * @return search outcome containing hits and stage timings
+	 */
+	public VectorSearchResult searchWithTimings(RepoRef repo, String query, int k, Set<ChunkType> types, String pathPrefix) {
 		Objects.requireNonNull(repo, "repo must not be null");
 		Objects.requireNonNull(query, "query must not be null");
 		if (k <= 0) {
-			return List.of();
+			return new VectorSearchResult(List.of(), 0L, 0L, 0L);
 		}
 
+		long start = System.currentTimeMillis();
+
+		long embedStart = System.currentTimeMillis();
 		float[] queryVector = embeddingService.embedQuery(query);
+		long embedMillis = System.currentTimeMillis() - embedStart;
 
 		List<Map<String, Object>> mustConditions = new ArrayList<>();
 		mustConditions.add(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())));
@@ -135,7 +165,10 @@ public class VectorStore {
 		String collection = properties.qdrant().collection();
 
 		int fetchLimit = (pathPrefix != null && !pathPrefix.isBlank()) ? Math.max(k * 4, 100) : k;
+
+		long searchStart = System.currentTimeMillis();
 		List<QdrantScoredPoint> scoredPoints = qdrantClient.search(collection, queryVector, filter, fetchLimit);
+		long searchMillis = System.currentTimeMillis() - searchStart;
 
 		List<SearchHit> hits = scoredPoints.stream()
 				.map(chunkPointMapper::toSearchHit)
@@ -148,10 +181,35 @@ public class VectorStore {
 					.toList();
 		}
 
-		return hits.stream()
+		List<SearchHit> sortedHits = hits.stream()
 				.sorted(Comparator.comparingDouble(SearchHit::score).reversed())
 				.limit(k)
 				.toList();
+
+		long tookMillis = System.currentTimeMillis() - start;
+
+		return new VectorSearchResult(sortedHits, embedMillis, searchMillis, tookMillis);
+	}
+
+	/**
+	 * Counts the total number of vector points currently stored in Qdrant for the given repository.
+	 *
+	 * @param repo repository identifier reference
+	 * @return total point count for this repository in the collection
+	 */
+	public long countRepoPoints(RepoRef repo) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Map<String, Object> filter = Map.of(
+				"must", List.of(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())))
+		);
+		try {
+			return qdrantClient.count(properties.qdrant().collection(), filter);
+		} catch (QdrantException ex) {
+			if (ex.getCause() instanceof RestClientResponseException rcre && rcre.getStatusCode().value() == 404) {
+				return 0;
+			}
+			throw ex;
+		}
 	}
 
 	/**

@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class VectorStoreIntegrationTest {
 
 	@Container
-	static final QdrantContainer qdrant = new QdrantContainer("qdrant/qdrant:v1.13.4");
+	static final QdrantContainer qdrant = new QdrantContainer("qdrant/qdrant:v1.19.2");
 
 	private VectorStore vectorStore;
 	private QdrantClient qdrantClient;
@@ -110,7 +110,43 @@ class VectorStoreIntegrationTest {
 		assertThat(topHit.chunkType()).isEqualTo(ChunkType.METHOD);
 		assertThat(topHit.score()).isGreaterThan(0.5);
 
-		// Verify count in Qdrant
+		// Type filter that excludes METHOD should return empty
+		List<SearchHit> classHits = vectorStore.search(
+				testRepo,
+				"how does the app handle GitHub API rate limits?",
+				3,
+				Set.of(ChunkType.CLASS),
+				"src/main/java"
+		);
+		assertThat(classHits).isEmpty();
+
+		// Path prefix that doesn't match should return empty
+		List<SearchHit> nonMatchingPathHits = vectorStore.search(
+				testRepo,
+				"how does the app handle GitHub API rate limits?",
+				3,
+				Set.of(ChunkType.METHOD),
+				"src/test/java"
+		);
+		assertThat(nonMatchingPathHits).isEmpty();
+
+		// Test searchWithTimings
+		VectorSearchResult timedResult = vectorStore.searchWithTimings(
+				testRepo,
+				"how does the app handle GitHub API rate limits?",
+				3,
+				Set.of(ChunkType.METHOD),
+				"src/main/java"
+		);
+		assertThat(timedResult.hits()).isNotEmpty();
+		assertThat(timedResult.embedMillis()).isGreaterThanOrEqualTo(0);
+		assertThat(timedResult.searchMillis()).isGreaterThanOrEqualTo(0);
+		assertThat(timedResult.tookMillis()).isGreaterThanOrEqualTo(0);
+
+		// Verify count in Qdrant via countRepoPoints
+		long repoPoints = vectorStore.countRepoPoints(testRepo);
+		assertThat(repoPoints).isEqualTo(3);
+
 		long totalPoints = qdrantClient.count(properties.qdrant().collection(), null);
 		assertThat(totalPoints).isEqualTo(3);
 
@@ -128,6 +164,7 @@ class VectorStoreIntegrationTest {
 
 		assertThat(run1Count).isEqualTo(0);
 		assertThat(run2Count).isEqualTo(2);
+		assertThat(vectorStore.countRepoPoints(testRepo)).isEqualTo(2);
 	}
 
 	private Chunk createChunk(

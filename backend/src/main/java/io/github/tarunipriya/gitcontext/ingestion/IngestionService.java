@@ -1,6 +1,8 @@
 package io.github.tarunipriya.gitcontext.ingestion;
 
 import io.github.tarunipriya.gitcontext.chunking.ChunkingService;
+import io.github.tarunipriya.gitcontext.indexing.IndexSummary;
+import io.github.tarunipriya.gitcontext.indexing.VectorStore;
 import io.github.tarunipriya.gitcontext.ingestion.RepositoryCloner.ClonedRepo;
 import io.github.tarunipriya.gitcontext.ingestion.github.GitHubApiException;
 import io.github.tarunipriya.gitcontext.ingestion.github.IssueIngestor;
@@ -16,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,7 +26,7 @@ import org.springframework.web.client.RestClientException;
 
 /**
  * Unified ingestion service orchestrating all repository ingestion stages:
- * cloning, file scanning, commit history parsing, pull requests, issues, and chunking.
+ * cloning, file scanning, commit history parsing, pull requests, issues, chunking, and indexing.
  */
 @Service
 public class IngestionService {
@@ -36,6 +39,7 @@ public class IngestionService {
 	private final PullRequestIngestor pullRequestIngestor;
 	private final IssueIngestor issueIngestor;
 	private final ChunkingService chunkingService;
+	private final VectorStore vectorStore;
 
 	/**
 	 * Creates a new {@link IngestionService} with all required stage ingestors.
@@ -46,6 +50,7 @@ public class IngestionService {
 	 * @param pullRequestIngestor GitHub pull request ingestor
 	 * @param issueIngestor GitHub issue ingestor
 	 * @param chunkingService document chunking service
+	 * @param vectorStore vector store indexing facade
 	 */
 	public IngestionService(
 			RepositoryCloner repositoryCloner,
@@ -53,7 +58,8 @@ public class IngestionService {
 			CommitIngestor commitIngestor,
 			PullRequestIngestor pullRequestIngestor,
 			IssueIngestor issueIngestor,
-			ChunkingService chunkingService
+			ChunkingService chunkingService,
+			VectorStore vectorStore
 	) {
 		this.repositoryCloner = Objects.requireNonNull(repositoryCloner, "repositoryCloner must not be null");
 		this.fileIngestor = Objects.requireNonNull(fileIngestor, "fileIngestor must not be null");
@@ -61,20 +67,34 @@ public class IngestionService {
 		this.pullRequestIngestor = Objects.requireNonNull(pullRequestIngestor, "pullRequestIngestor must not be null");
 		this.issueIngestor = Objects.requireNonNull(issueIngestor, "issueIngestor must not be null");
 		this.chunkingService = Objects.requireNonNull(chunkingService, "chunkingService must not be null");
+		this.vectorStore = Objects.requireNonNull(vectorStore, "vectorStore must not be null");
 	}
 
 	/**
-	 * Executes unified ingestion for the specified repository across all stages.
-	 *
-	 * <p>Cloning failures are fatal and propagate immediately. GitHub API failures
-	 * (e.g. rate limits, network errors, missing tokens) are recorded as warnings,
-	 * allowing local repository results (files and commits) to be preserved.
+	 * Executes unified ingestion for the specified repository across all stages with a generated run identifier.
 	 *
 	 * @param repo repository identifier reference
 	 * @return aggregated {@link IngestionResult}
 	 */
 	public IngestionResult ingest(RepoRef repo) {
+		return ingest(repo, UUID.randomUUID().toString());
+	}
+
+	/**
+	 * Executes unified ingestion for the specified repository across all stages.
+	 *
+	 * <p>Cloning failures are fatal and propagate immediately. GitHub API, chunking,
+	 * and indexing failures are recorded as warnings, allowing repository results to be preserved.
+	 *
+	 * @param repo repository identifier reference
+	 * @param runId indexing run identifier
+	 * @return aggregated {@link IngestionResult}
+	 */
+	public IngestionResult ingest(RepoRef repo, String runId) {
 		Objects.requireNonNull(repo, "repo must not be null");
+		if (runId == null || runId.isBlank()) {
+			runId = UUID.randomUUID().toString();
+		}
 
 		long totalStart = System.currentTimeMillis();
 		Map<String, Long> stageDurations = new LinkedHashMap<>();
@@ -159,6 +179,28 @@ public class IngestionService {
 		stageDurations.put("chunking", chunkDuration);
 		log.info("Stage [chunking] completed with {} chunks in {} ms", chunks.size(), chunkDuration);
 
+		// Stage 7: Indexing (non-fatal)
+		long indexStart = System.currentTimeMillis();
+		int indexedPoints = 0;
+		long embedMillis = 0L;
+		long upsertMillis = 0L;
+		try {
+			IndexSummary indexSummary = vectorStore.index(repo, runId, chunks);
+			indexedPoints = indexSummary.count();
+			embedMillis = indexSummary.embedMillis();
+			upsertMillis = indexSummary.upsertMillis();
+			vectorStore.deleteStale(repo, runId);
+		} catch (Exception e) {
+			String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+			String msg = "Indexing skipped: " + reason + "; search will not include this run";
+			log.warn("Stage [indexing] failed: {}", e.getMessage(), e);
+			warnings.add(msg);
+		}
+		long indexDuration = System.currentTimeMillis() - indexStart;
+		stageDurations.put("indexing", indexDuration);
+		log.info("Stage [indexing] completed with {} points in {} ms (embed: {} ms, upsert: {} ms)",
+				indexedPoints, indexDuration, embedMillis, upsertMillis);
+
 		// Counts by SourceType
 		Map<SourceType, Integer> counts = new EnumMap<>(SourceType.class);
 		for (SourceType type : SourceType.values()) {
@@ -186,8 +228,8 @@ public class IngestionService {
 		double avgTokens = chunks.isEmpty() ? 0.0 : (double) totalTokens / chunks.size();
 
 		long totalDuration = System.currentTimeMillis() - totalStart;
-		log.info("Ingestion completed for {} in {} ms: total documents={}, total chunks={}, warnings={}",
-				repo.fullName(), totalDuration, allDocuments.size(), chunks.size(), warnings.size());
+		log.info("Ingestion completed for {} in {} ms: total documents={}, total chunks={}, indexed points={}, warnings={}",
+				repo.fullName(), totalDuration, allDocuments.size(), chunks.size(), indexedPoints, warnings.size());
 
 		return new IngestionResult(
 				repo,
@@ -198,6 +240,9 @@ public class IngestionService {
 				chunkCounts,
 				avgTokens,
 				maxTokens,
+				indexedPoints,
+				embedMillis,
+				upsertMillis,
 				stageDurations,
 				totalDuration,
 				warnings
