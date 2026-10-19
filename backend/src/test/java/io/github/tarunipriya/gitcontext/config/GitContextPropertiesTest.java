@@ -95,6 +95,16 @@ class GitContextPropertiesTest {
 			assertThat(hybrid.candidates()).isEqualTo(50);
 			assertThat(hybrid.rrfK()).isEqualTo(60);
 			assertThat(hybrid.defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID);
+
+			// Rerank defaults
+			GitContextProperties.RerankProperties rerank = props.rerank();
+			assertThat(rerank).isNotNull();
+			assertThat(rerank.enabled()).isFalse();
+			assertThat(rerank.modelName()).isEqualTo("ms-marco-MiniLM-L-6-v2");
+			assertThat(rerank.modelUrl()).isEqualTo("https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model_quantized.onnx");
+			assertThat(rerank.tokenizerUrl()).isEqualTo("https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json");
+			assertThat(rerank.candidates()).isEqualTo(30);
+			assertThat(rerank.maxTextChars()).isEqualTo(1000);
 		});
 	}
 
@@ -130,7 +140,13 @@ class GitContextPropertiesTest {
 				"gitcontext.keyword.path-boost=1.5",
 				"gitcontext.hybrid.candidates=30",
 				"gitcontext.hybrid.rrf-k=40",
-				"gitcontext.hybrid.default-mode=KEYWORD"
+				"gitcontext.hybrid.default-mode=KEYWORD",
+				"gitcontext.rerank.enabled=true",
+				"gitcontext.rerank.model-name=custom-reranker",
+				"gitcontext.rerank.model-url=https://custom/model.onnx",
+				"gitcontext.rerank.tokenizer-url=https://custom/tokenizer.json",
+				"gitcontext.rerank.candidates=15",
+				"gitcontext.rerank.max-text-chars=1500"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -174,6 +190,13 @@ class GitContextPropertiesTest {
 			assertThat(props.hybrid().candidates()).isEqualTo(30);
 			assertThat(props.hybrid().rrfK()).isEqualTo(40);
 			assertThat(props.hybrid().defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.KEYWORD);
+
+			assertThat(props.rerank().enabled()).isTrue();
+			assertThat(props.rerank().modelName()).isEqualTo("custom-reranker");
+			assertThat(props.rerank().modelUrl()).isEqualTo("https://custom/model.onnx");
+			assertThat(props.rerank().tokenizerUrl()).isEqualTo("https://custom/tokenizer.json");
+			assertThat(props.rerank().candidates()).isEqualTo(15);
+			assertThat(props.rerank().maxTextChars()).isEqualTo(1500);
 		});
 	}
 

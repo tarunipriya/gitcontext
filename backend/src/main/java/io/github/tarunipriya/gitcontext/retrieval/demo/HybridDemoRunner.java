@@ -85,6 +85,8 @@ public class HybridDemoRunner implements CommandLineRunner {
 
 		log.info("==========================================================================================");
 		log.info("Comparing Retrieval Modes: VECTOR vs KEYWORD vs HYBRID (RRF)");
+		log.info("Note: Running with excludeTests=true and excluding paths containing '/demo/' to prevent data");
+		log.info("leakage, because demo runner source files literally contain the benchmark questions.");
 		log.info("==========================================================================================");
 
 		for (DemoEvaluationItem item : EVALUATION_ITEMS) {
@@ -97,9 +99,14 @@ public class HybridDemoRunner implements CommandLineRunner {
 			log.info("EXPECTED ANSWER SYMBOL(S): {}", expected);
 			log.info("------------------------------------------------------------------------------------------");
 
-			HybridSearchResult vectorResult = hybridSearchService.search(repoRef, question, 5, null, null, SearchMode.VECTOR);
-			HybridSearchResult keywordResult = hybridSearchService.search(repoRef, question, 5, null, null, SearchMode.KEYWORD);
-			HybridSearchResult hybridResult = hybridSearchService.search(repoRef, question, 5, null, null, SearchMode.HYBRID);
+			HybridSearchResult vectorRaw = hybridSearchService.search(repoRef, question, 15, null, null, SearchMode.VECTOR, false, true);
+			HybridSearchResult vectorResult = filterDemoHits(vectorRaw, 5);
+
+			HybridSearchResult keywordRaw = hybridSearchService.search(repoRef, question, 15, null, null, SearchMode.KEYWORD, false, true);
+			HybridSearchResult keywordResult = filterDemoHits(keywordRaw, 5);
+
+			HybridSearchResult hybridRaw = hybridSearchService.search(repoRef, question, 15, null, null, SearchMode.HYBRID, false, true);
+			HybridSearchResult hybridResult = filterDemoHits(hybridRaw, 5);
 
 			printModeTable(SearchMode.VECTOR, vectorResult);
 			printModeTable(SearchMode.KEYWORD, keywordResult);
@@ -170,5 +177,23 @@ public class HybridDemoRunner implements CommandLineRunner {
 			}
 		}
 		return "not in top " + hits.size();
+	}
+
+	private HybridSearchResult filterDemoHits(HybridSearchResult result, int limit) {
+		List<HybridSearchHit> filtered = result.hits().stream()
+				.filter(h -> h.hit().path() == null || !h.hit().path().replace('\\', '/').contains("/demo/"))
+				.limit(limit)
+				.toList();
+		return new HybridSearchResult(
+				filtered,
+				result.mode(),
+				result.reranked(),
+				result.warnings(),
+				result.vectorMillis(),
+				result.keywordMillis(),
+				result.fusionMillis(),
+				result.rerankMillis(),
+				result.tookMillis()
+		);
 	}
 }

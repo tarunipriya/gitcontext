@@ -68,6 +68,8 @@ public class SearchController {
 	 * @param mode search mode: vector, keyword, or hybrid (case-insensitive, default from config)
 	 * @param type optional comma-separated {@link ChunkType} filter values
 	 * @param path optional path prefix filter
+	 * @param rerank optional boolean requesting cross-encoder reranking (defaults to gitcontext.rerank.enabled)
+	 * @param excludeTests optional boolean to filter out test files and directories (default: false)
 	 * @return search response containing query, limits, mode, warnings, timings, and ranked hits
 	 */
 	@GetMapping("/api/repos/{owner}/{name}/search")
@@ -78,7 +80,9 @@ public class SearchController {
 			@RequestParam(name = "k", defaultValue = "10") int k,
 			@RequestParam(name = "mode", required = false) String mode,
 			@RequestParam(name = "type", required = false) String type,
-			@RequestParam(name = "path", required = false) String path
+			@RequestParam(name = "path", required = false) String path,
+			@RequestParam(name = "rerank", required = false) Boolean rerank,
+			@RequestParam(name = "excludeTests", defaultValue = "false") boolean excludeTests
 	) {
 		RepoRef repo = new RepoRef(owner, name);
 
@@ -86,6 +90,7 @@ public class SearchController {
 		int validatedK = validateK(k);
 		SearchMode searchMode = parseSearchMode(mode);
 		Set<ChunkType> types = parseChunkTypes(type);
+		boolean effectiveRerank = (rerank != null) ? rerank : properties.rerank().enabled();
 
 		// Check repository existence in both indexes
 		boolean keywordExists = keywordIndex.exists(repo);
@@ -122,12 +127,14 @@ public class SearchController {
 				validatedK,
 				types,
 				path,
-				searchMode
+				searchMode,
+				effectiveRerank,
+				excludeTests
 		);
 
-		log.info("Search repo='{}' mode={} k={} hits={} tookMillis={}",
-				repo.fullName(), searchResult.mode(), validatedK, searchResult.hits().size(),
-				searchResult.tookMillis());
+		log.info("Search repo='{}' mode={} k={} reranked={} hits={} tookMillis={}",
+				repo.fullName(), searchResult.mode(), validatedK, searchResult.reranked(),
+				searchResult.hits().size(), searchResult.tookMillis());
 
 		List<SearchHitItemResponse> hitResponses = searchResult.hits().stream()
 				.map(SearchHitItemResponse::from)
@@ -137,10 +144,12 @@ public class SearchController {
 				validatedQuery,
 				validatedK,
 				searchResult.mode(),
+				searchResult.reranked(),
 				searchResult.tookMillis(),
 				searchResult.vectorMillis(),
 				searchResult.keywordMillis(),
 				searchResult.fusionMillis(),
+				searchResult.rerankMillis(),
 				0L,
 				searchResult.vectorMillis(),
 				searchResult.warnings(),

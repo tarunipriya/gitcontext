@@ -269,6 +269,35 @@ class IngestionServiceTest {
 		assertThat(result.stageDurationsMillis()).containsKey("keywordIndexing");
 	}
 
+	@Test
+	@DisplayName("VectorStore deleteStale failure produces warning and preserves indexedPoints")
+	void deleteStaleFailure_producesSpecificWarningAndKeepsIndexedPoints() {
+		String headSha = "0123456789abcdef0123456789abcdef01234567";
+		ClonedRepo clonedRepo = new ClonedRepo(repoRef, Path.of("mock/path"), headSha, "main");
+		when(repositoryCloner.cloneOrUpdate(repoRef)).thenReturn(clonedRepo);
+
+		Document codeDoc = createDoc(SourceType.CODE, "src/App.java", "code 1");
+		when(fileIngestor.ingest(clonedRepo)).thenReturn(List.of(codeDoc));
+		when(commitIngestor.ingest(clonedRepo)).thenReturn(List.of());
+		when(pullRequestIngestor.ingest(repoRef)).thenReturn(List.of());
+		when(issueIngestor.ingest(repoRef)).thenReturn(List.of());
+
+		Chunk chunk = Chunk.of("doc1", 0, "chunk 1 text", "chunk 1 content",
+				ChunkMetadata.from(codeDoc.metadata(), ChunkType.CLASS, 30, "App", null, null, 1, 10));
+		when(chunkingService.chunkAll(any())).thenReturn(List.of(chunk));
+		when(vectorStore.index(eq(repoRef), any(), any())).thenReturn(new IndexSummary(7, 10L, 20L));
+
+		org.mockito.Mockito.doThrow(new RuntimeException("Qdrant delete error"))
+				.when(vectorStore).deleteStale(eq(repoRef), any());
+
+		IngestionResult result = ingestionService.ingest(repoRef);
+
+		assertThat(result.indexedPoints()).isEqualTo(7);
+		assertThat(result.warnings()).hasSize(1);
+		assertThat(result.warnings().getFirst()).contains("Old index entries could not be cleaned up: Qdrant delete error");
+		assertThat(result.warnings().getFirst()).doesNotContain("Indexing skipped");
+	}
+
 	private Document createDoc(SourceType sourceType, String key, String content) {
 		DocumentMetadata metadata = new DocumentMetadata(
 				repoRef.fullName(),

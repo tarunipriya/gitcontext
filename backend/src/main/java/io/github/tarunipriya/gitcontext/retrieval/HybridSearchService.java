@@ -8,6 +8,8 @@ import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableExcepti
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
+import io.github.tarunipriya.gitcontext.retrieval.rerank.RerankedHit;
+import io.github.tarunipriya.gitcontext.retrieval.rerank.Reranker;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -27,27 +29,71 @@ public class HybridSearchService {
 
 	private final VectorStore vectorStore;
 	private final KeywordIndex keywordIndex;
+	private final Reranker reranker;
 	private final GitContextProperties properties;
 
 	/**
-	 * Creates a new {@link HybridSearchService}.
+	 * Creates a new {@link HybridSearchService} with full dependencies.
 	 *
 	 * @param vectorStore vector store facade for Qdrant
 	 * @param keywordIndex Lucene BM25 keyword index facade
+	 * @param reranker cross-encoder reranker
 	 * @param properties application configuration properties
 	 */
 	public HybridSearchService(
 			VectorStore vectorStore,
 			KeywordIndex keywordIndex,
+			Reranker reranker,
 			GitContextProperties properties
 	) {
 		this.vectorStore = Objects.requireNonNull(vectorStore, "vectorStore must not be null");
 		this.keywordIndex = Objects.requireNonNull(keywordIndex, "keywordIndex must not be null");
+		this.reranker = reranker;
 		this.properties = Objects.requireNonNull(properties, "properties must not be null");
 	}
 
 	/**
-	 * Searches chunks belonging to the specified repository using the designated search mode.
+	 * Searches chunks belonging to the specified repository with rerank and test exclusion flags.
+	 *
+	 * @param repo repository reference
+	 * @param query search query or question
+	 * @param k maximum number of hits to return
+	 * @param types optional filter for structural chunk types
+	 * @param pathPrefix optional file path prefix filter
+	 * @param mode search strategy (VECTOR, KEYWORD, or HYBRID; defaults from config if null)
+	 * @param rerank whether cross-encoder reranking is requested
+	 * @param excludeTests whether test-related files should be filtered out
+	 * @return aggregated search outcome with hits, active mode, warnings, and latency breakdown
+	 */
+	public HybridSearchResult search(
+			RepoRef repo,
+			String query,
+			int k,
+			Set<ChunkType> types,
+			String pathPrefix,
+			SearchMode mode,
+			boolean rerank,
+			boolean excludeTests
+	) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(query, "query must not be null");
+
+		SearchMode effectiveMode = (mode != null) ? mode : properties.hybrid().defaultMode();
+		if (k <= 0) {
+			return new HybridSearchResult(List.of(), effectiveMode, false, List.of(), 0L, 0L, 0L, 0L, 0L);
+		}
+
+		long totalStart = System.currentTimeMillis();
+
+		return switch (effectiveMode) {
+			case VECTOR -> executeVectorSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
+			case KEYWORD -> executeKeywordSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
+			case HYBRID -> executeHybridSearch(repo, query, k, types, pathPrefix, rerank, excludeTests, totalStart);
+		};
+	}
+
+	/**
+	 * Searches chunks belonging to the specified repository using default rerank settings without test exclusion.
 	 *
 	 * @param repo repository reference
 	 * @param query search query or question
@@ -65,21 +111,7 @@ public class HybridSearchService {
 			String pathPrefix,
 			SearchMode mode
 	) {
-		Objects.requireNonNull(repo, "repo must not be null");
-		Objects.requireNonNull(query, "query must not be null");
-
-		SearchMode effectiveMode = (mode != null) ? mode : properties.hybrid().defaultMode();
-		if (k <= 0) {
-			return new HybridSearchResult(List.of(), effectiveMode, List.of(), 0L, 0L, 0L, 0L);
-		}
-
-		long totalStart = System.currentTimeMillis();
-
-		return switch (effectiveMode) {
-			case VECTOR -> executeVectorSearch(repo, query, k, types, pathPrefix, totalStart);
-			case KEYWORD -> executeKeywordSearch(repo, query, k, types, pathPrefix, totalStart);
-			case HYBRID -> executeHybridSearch(repo, query, k, types, pathPrefix, totalStart);
-		};
+		return search(repo, query, k, types, pathPrefix, mode, false, false);
 	}
 
 	private HybridSearchResult executeVectorSearch(
@@ -88,14 +120,23 @@ public class HybridSearchService {
 			int k,
 			Set<ChunkType> types,
 			String pathPrefix,
+			boolean excludeTests,
 			long totalStart
 	) {
-		VectorSearchResult result = vectorStore.searchWithTimings(repo, query, k, types, pathPrefix);
+		int fetchCount = excludeTests ? Math.max(k, properties.hybrid().candidates()) : k;
+		VectorSearchResult result = vectorStore.searchWithTimings(repo, query, fetchCount, types, pathPrefix);
 		long vectorMillis = result.searchMillis() + result.embedMillis();
 
-		List<HybridSearchHit> hits = new ArrayList<>(result.hits().size());
-		for (int i = 0; i < result.hits().size(); i++) {
-			SearchHit hit = result.hits().get(i);
+		List<SearchHit> sourceHits = result.hits();
+		if (excludeTests) {
+			sourceHits = sourceHits.stream()
+					.filter(h -> !TestFileFilter.isTestPath(h.path()))
+					.toList();
+		}
+
+		List<HybridSearchHit> hits = new ArrayList<>(Math.min(k, sourceHits.size()));
+		for (int i = 0; i < sourceHits.size() && hits.size() < k; i++) {
+			SearchHit hit = sourceHits.get(i);
 			hits.add(new HybridSearchHit(
 					hit,
 					null,
@@ -107,7 +148,7 @@ public class HybridSearchService {
 		}
 
 		long tookMillis = System.currentTimeMillis() - totalStart;
-		return new HybridSearchResult(hits, SearchMode.VECTOR, List.of(), vectorMillis, 0L, 0L, tookMillis);
+		return new HybridSearchResult(hits, SearchMode.VECTOR, false, List.of(), vectorMillis, 0L, 0L, 0L, tookMillis);
 	}
 
 	private HybridSearchResult executeKeywordSearch(
@@ -116,14 +157,22 @@ public class HybridSearchService {
 			int k,
 			Set<ChunkType> types,
 			String pathPrefix,
+			boolean excludeTests,
 			long totalStart
 	) {
+		int fetchCount = excludeTests ? Math.max(k, properties.hybrid().candidates()) : k;
 		long kStart = System.currentTimeMillis();
-		List<SearchHit> keywordHits = keywordIndex.search(repo, query, k, types, pathPrefix);
+		List<SearchHit> keywordHits = keywordIndex.search(repo, query, fetchCount, types, pathPrefix);
 		long keywordMillis = System.currentTimeMillis() - kStart;
 
-		List<HybridSearchHit> hits = new ArrayList<>(keywordHits.size());
-		for (int i = 0; i < keywordHits.size(); i++) {
+		if (excludeTests) {
+			keywordHits = keywordHits.stream()
+					.filter(h -> !TestFileFilter.isTestPath(h.path()))
+					.toList();
+		}
+
+		List<HybridSearchHit> hits = new ArrayList<>(Math.min(k, keywordHits.size()));
+		for (int i = 0; i < keywordHits.size() && hits.size() < k; i++) {
 			SearchHit hit = keywordHits.get(i);
 			hits.add(new HybridSearchHit(
 					hit,
@@ -136,7 +185,7 @@ public class HybridSearchService {
 		}
 
 		long tookMillis = System.currentTimeMillis() - totalStart;
-		return new HybridSearchResult(hits, SearchMode.KEYWORD, List.of(), 0L, keywordMillis, 0L, tookMillis);
+		return new HybridSearchResult(hits, SearchMode.KEYWORD, false, List.of(), 0L, keywordMillis, 0L, 0L, tookMillis);
 	}
 
 	private HybridSearchResult executeHybridSearch(
@@ -145,6 +194,8 @@ public class HybridSearchService {
 			int k,
 			Set<ChunkType> types,
 			String pathPrefix,
+			boolean rerank,
+			boolean excludeTests,
 			long totalStart
 	) {
 		int candidates = properties.hybrid().candidates();
@@ -207,18 +258,69 @@ public class HybridSearchService {
 
 		// 3. Reciprocal Rank Fusion
 		long fusionStart = System.currentTimeMillis();
-		List<HybridSearchHit> fusedHits = ReciprocalRankFusion.fuse(vectorHits, keywordHits, k, rrfK);
+		int totalCandidates = vectorHits.size() + keywordHits.size();
+		List<HybridSearchHit> fusedHits = ReciprocalRankFusion.fuse(vectorHits, keywordHits, Math.max(1, totalCandidates), rrfK);
 		long fusionMillis = System.currentTimeMillis() - fusionStart;
+
+		// 4. Test file filtering applied before taking top candidates / top k
+		if (excludeTests) {
+			fusedHits = fusedHits.stream()
+					.filter(hit -> !TestFileFilter.isTestPath(hit.hit().path()))
+					.toList();
+		}
+
+		// 5. Cross-Encoder Reranking
+		boolean shouldRerank = rerank;
+		boolean reranked = false;
+		long rerankMillis = 0L;
+		List<HybridSearchHit> finalHits;
+
+		if (shouldRerank && !fusedHits.isEmpty()) {
+			int rerankCandidatesLimit = properties.rerank().candidates();
+			List<HybridSearchHit> candidateHits = fusedHits.stream()
+					.limit(rerankCandidatesLimit)
+					.toList();
+
+			long rerankStart = System.currentTimeMillis();
+			try {
+				if (reranker == null) {
+					throw new IllegalStateException("No reranker implementation configured");
+				}
+				List<RerankedHit> rerankedHits = reranker.rerank(query, candidateHits);
+				rerankMillis = System.currentTimeMillis() - rerankStart;
+				reranked = true;
+
+				finalHits = rerankedHits.stream()
+						.limit(k)
+						.map(rh -> rh.candidate().withRerank(rh.rerankScore(), rh.fusedRank()))
+						.toList();
+			} catch (Exception e) {
+				rerankMillis = System.currentTimeMillis() - rerankStart;
+				String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+				String warn = "Reranking skipped: " + reason;
+				log.warn(warn, e);
+				warnings.add(warn);
+				finalHits = fusedHits.stream()
+						.limit(k)
+						.toList();
+			}
+		} else {
+			finalHits = fusedHits.stream()
+					.limit(k)
+					.toList();
+		}
 
 		long tookMillis = System.currentTimeMillis() - totalStart;
 
 		return new HybridSearchResult(
-				fusedHits,
+				finalHits,
 				SearchMode.HYBRID,
+				reranked,
 				warnings,
 				vectorMillis,
 				keywordMillis,
 				fusionMillis,
+				rerankMillis,
 				tookMillis
 		);
 	}

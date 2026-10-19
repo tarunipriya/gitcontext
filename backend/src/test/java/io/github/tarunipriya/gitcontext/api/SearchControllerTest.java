@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -58,7 +59,16 @@ class SearchControllerTest {
 				60,
 				SearchMode.HYBRID
 		);
+		GitContextProperties.RerankProperties rerankConfig = new GitContextProperties.RerankProperties(
+				false,
+				"ms-marco-MiniLM-L-6-v2",
+				"http://localhost/model.onnx",
+				"http://localhost/tokenizer.json",
+				30,
+				1000
+		);
 		when(properties.hybrid()).thenReturn(hybridConfig);
+		when(properties.rerank()).thenReturn(rerankConfig);
 	}
 
 	@Test
@@ -103,16 +113,20 @@ class SearchControllerTest {
 				0.8523,
 				1,
 				15.42,
-				2
+				2,
+				null,
+				null
 		);
 
 		HybridSearchResult searchResult = new HybridSearchResult(
 				List.of(hybridHit),
 				SearchMode.HYBRID,
+				false,
 				List.of("A minor warning"),
 				15L,
 				10L,
 				5L,
+				0L,
 				40L
 		);
 
@@ -122,7 +136,9 @@ class SearchControllerTest {
 				eq(5),
 				eq(Set.of(ChunkType.METHOD, ChunkType.CLASS)),
 				eq("src/main"),
-				eq(SearchMode.HYBRID)
+				eq(SearchMode.HYBRID),
+				eq(false),
+				eq(false)
 		)).thenReturn(searchResult);
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
@@ -134,6 +150,7 @@ class SearchControllerTest {
 				.andExpect(jsonPath("$.query").value("how to handle rate limits"))
 				.andExpect(jsonPath("$.k").value(5))
 				.andExpect(jsonPath("$.mode").value("HYBRID"))
+				.andExpect(jsonPath("$.reranked").value(false))
 				.andExpect(jsonPath("$.tookMillis").value(40))
 				.andExpect(jsonPath("$.vectorMillis").value(15))
 				.andExpect(jsonPath("$.keywordMillis").value(10))
@@ -165,7 +182,7 @@ class SearchControllerTest {
 		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(10L);
 		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
 
-		when(hybridSearchService.search(eq(testRepo), eq("test query"), eq(10), any(), any(), eq(SearchMode.KEYWORD)))
+		when(hybridSearchService.search(eq(testRepo), eq("test query"), eq(10), any(), any(), eq(SearchMode.KEYWORD), anyBoolean(), anyBoolean()))
 				.thenReturn(new HybridSearchResult(List.of(), SearchMode.KEYWORD, List.of(), 0L, 5L, 0L, 10L));
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
@@ -278,8 +295,8 @@ class SearchControllerTest {
 				.thenThrow(new QdrantUnavailableException("http://localhost:6333", new RuntimeException("connection refused")));
 		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
 
-		when(hybridSearchService.search(eq(testRepo), eq("valid query"), eq(10), any(), any(), eq(SearchMode.KEYWORD)))
-				.thenReturn(new HybridSearchResult(List.of(), SearchMode.KEYWORD, List.of(), 0L, 12L, 0L, 15L));
+		when(hybridSearchService.search(eq(testRepo), eq("valid query"), eq(10), any(), any(), eq(SearchMode.KEYWORD), anyBoolean(), anyBoolean()))
+				.thenReturn(new HybridSearchResult(List.of(), SearchMode.KEYWORD, false, List.of(), 0L, 12L, 0L, 0L, 15L));
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
 						.param("q", "valid query")
@@ -294,13 +311,113 @@ class SearchControllerTest {
 		RepoRef mixedCaseRepo = new RepoRef("TestOwner", "TestRepo");
 		when(vectorStore.countRepoPoints(eq(mixedCaseRepo))).thenReturn(2L);
 		when(keywordIndex.exists(eq(mixedCaseRepo))).thenReturn(true);
-		when(hybridSearchService.search(eq(mixedCaseRepo), eq("test query"), eq(10), eq(Set.of()), any(), eq(SearchMode.HYBRID)))
-				.thenReturn(new HybridSearchResult(List.of(), SearchMode.HYBRID, List.of(), 5L, 5L, 2L, 18L));
+		when(hybridSearchService.search(eq(mixedCaseRepo), eq("test query"), eq(10), eq(Set.of()), any(), eq(SearchMode.HYBRID), anyBoolean(), anyBoolean()))
+				.thenReturn(new HybridSearchResult(List.of(), SearchMode.HYBRID, false, List.of(), 5L, 5L, 2L, 0L, 18L));
 
 		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "TestOwner", "TestRepo")
 						.param("q", "test query"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.query").value("test query"));
+	}
+
+	@Test
+	@DisplayName("GET /search forwards rerank and excludeTests params and renders rerank fields in response")
+	void search_withRerankAndExcludeTests_passesParamsAndIncludesRerankFieldsInResponse() throws Exception {
+		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(5L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
+
+		SearchHit hit = new SearchHit(
+				"pt-1",
+				0.9,
+				testRepo.normalizedKey(),
+				"run1",
+				"c1",
+				"doc1",
+				0,
+				SourceType.CODE,
+				ChunkType.FUNCTION,
+				"src/main/java/Service.java",
+				"java",
+				"doWork",
+				null,
+				null,
+				1,
+				10,
+				20,
+				"url",
+				"sha",
+				"// content",
+				"content"
+		);
+
+		HybridSearchHit hybridHit = new HybridSearchHit(
+				hit,
+				0.025,
+				0.9,
+				1,
+				10.0,
+				1,
+				0.9876,
+				2
+		);
+
+		HybridSearchResult searchResult = new HybridSearchResult(
+				List.of(hybridHit),
+				SearchMode.HYBRID,
+				true,
+				List.of(),
+				10L,
+				8L,
+				4L,
+				15L,
+				37L
+		);
+
+		when(hybridSearchService.search(
+				eq(testRepo),
+				eq("do work"),
+				eq(10),
+				any(),
+				any(),
+				eq(SearchMode.HYBRID),
+				eq(true),
+				eq(true)
+		)).thenReturn(searchResult);
+
+		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
+						.param("q", "do work")
+						.param("rerank", "true")
+						.param("excludeTests", "true"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.reranked").value(true))
+				.andExpect(jsonPath("$.rerankMillis").value(15))
+				.andExpect(jsonPath("$.hits[0].rerankScore").value(0.9876))
+				.andExpect(jsonPath("$.hits[0].fusedRank").value(2));
+	}
+
+	@Test
+	@DisplayName("GET /search with rerank=false passes false to HybridSearchService")
+	void search_withRerankFalse_passesFalseToService() throws Exception {
+		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(5L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
+
+		when(hybridSearchService.search(
+				eq(testRepo),
+				eq("query"),
+				eq(10),
+				any(),
+				any(),
+				eq(SearchMode.HYBRID),
+				eq(false),
+				eq(false)
+		)).thenReturn(new HybridSearchResult(List.of(), SearchMode.HYBRID, false, List.of(), 5L, 5L, 2L, 0L, 12L));
+
+		mockMvc.perform(get("/api/repos/{owner}/{name}/search", "testowner", "testrepo")
+						.param("q", "query")
+						.param("rerank", "false"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.reranked").value(false))
+				.andExpect(jsonPath("$.rerankMillis").value(0));
 	}
 
 	@Test
