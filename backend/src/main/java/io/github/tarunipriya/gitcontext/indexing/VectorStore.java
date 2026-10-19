@@ -1,0 +1,191 @@
+package io.github.tarunipriya.gitcontext.indexing;
+
+import io.github.tarunipriya.gitcontext.config.GitContextProperties;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantClient;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantPoint;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantScoredPoint;
+import io.github.tarunipriya.gitcontext.model.Chunk;
+import io.github.tarunipriya.gitcontext.model.ChunkType;
+import io.github.tarunipriya.gitcontext.model.RepoRef;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+/**
+ * High-level facade for indexing chunk vectors into Qdrant and executing filtered similarity searches.
+ *
+ * <p>Handles collection provisioning, batch document embedding, chunk point mapping,
+ * query embedding, client-side metadata filtering, and stale index point pruning.
+ */
+@Component
+public class VectorStore {
+
+	private static final Logger log = LoggerFactory.getLogger(VectorStore.class);
+
+	private final QdrantClient qdrantClient;
+	private final EmbeddingService embeddingService;
+	private final ChunkPointMapper chunkPointMapper;
+	private final GitContextProperties properties;
+
+	/**
+	 * Creates a new {@link VectorStore} facade.
+	 *
+	 * @param qdrantClient low-level Qdrant REST client
+	 * @param embeddingService embedding generator
+	 * @param chunkPointMapper point and search hit converter
+	 * @param properties application configuration properties
+	 */
+	public VectorStore(
+			QdrantClient qdrantClient,
+			EmbeddingService embeddingService,
+			ChunkPointMapper chunkPointMapper,
+			GitContextProperties properties
+	) {
+		this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient must not be null");
+		this.embeddingService = Objects.requireNonNull(embeddingService, "embeddingService must not be null");
+		this.chunkPointMapper = Objects.requireNonNull(chunkPointMapper, "chunkPointMapper must not be null");
+		this.properties = Objects.requireNonNull(properties, "properties must not be null");
+	}
+
+	/**
+	 * Indexes a list of chunks for a repository under a specific run identifier.
+	 *
+	 * <p>Ensures the target collection exists, embeds the {@link Chunk#text()} representations
+	 * in batches, maps them to vector points with metadata payloads, and upserts them into Qdrant.
+	 *
+	 * @param repo repository reference
+	 * @param runId indexing run identifier
+	 * @param chunks chunks to index
+	 * @return execution summary detailing point counts and elapsed durations
+	 */
+	public IndexSummary index(RepoRef repo, String runId, List<Chunk> chunks) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(runId, "runId must not be null");
+		Objects.requireNonNull(chunks, "chunks must not be null");
+
+		String collection = properties.qdrant().collection();
+		qdrantClient.ensureCollection(collection, embeddingService.dimension());
+
+		if (chunks.isEmpty()) {
+			return new IndexSummary(0, 0L, 0L);
+		}
+
+		log.info("Indexing {} chunks for {} (runId: {})", chunks.size(), repo.fullName(), runId);
+
+		long embedStart = System.currentTimeMillis();
+		List<String> texts = chunks.stream().map(Chunk::text).toList();
+		List<float[]> vectors = embeddingService.embedDocuments(texts);
+		long embedMillis = System.currentTimeMillis() - embedStart;
+
+		List<QdrantPoint> points = new ArrayList<>(chunks.size());
+		for (int i = 0; i < chunks.size(); i++) {
+			points.add(chunkPointMapper.toPoint(chunks.get(i), vectors.get(i), repo, runId));
+		}
+
+		long upsertStart = System.currentTimeMillis();
+		qdrantClient.upsert(collection, points, properties.qdrant().upsertBatchSize());
+		long upsertMillis = System.currentTimeMillis() - upsertStart;
+
+		log.info("Indexed {} chunks for {} in {} ms (embed: {} ms, upsert: {} ms)",
+				chunks.size(), repo.fullName(), embedMillis + upsertMillis, embedMillis, upsertMillis);
+
+		return new IndexSummary(chunks.size(), embedMillis, upsertMillis);
+	}
+
+	/**
+	 * Searches the vector store for chunks matching the query string within the specified repository.
+	 *
+	 * @param repo repository to query
+	 * @param query search query or question
+	 * @param k maximum number of hits to return
+	 * @param types optional filter for structural chunk types (null or empty for all)
+	 * @param pathPrefix optional file path prefix filter (client-side applied)
+	 * @return list of search hits sorted in descending order of similarity score
+	 */
+	public List<SearchHit> search(RepoRef repo, String query, int k, Set<ChunkType> types, String pathPrefix) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(query, "query must not be null");
+		if (k <= 0) {
+			return List.of();
+		}
+
+		float[] queryVector = embeddingService.embedQuery(query);
+
+		List<Map<String, Object>> mustConditions = new ArrayList<>();
+		mustConditions.add(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())));
+
+		if (types != null && !types.isEmpty()) {
+			if (types.size() == 1) {
+				String typeName = types.iterator().next().name();
+				mustConditions.add(Map.of("key", "chunkType", "match", Map.of("value", typeName)));
+			} else {
+				List<String> typeNames = types.stream().map(ChunkType::name).toList();
+				mustConditions.add(Map.of("key", "chunkType", "match", Map.of("any", typeNames)));
+			}
+		}
+
+		Map<String, Object> filter = Map.of("must", mustConditions);
+		String collection = properties.qdrant().collection();
+
+		int fetchLimit = (pathPrefix != null && !pathPrefix.isBlank()) ? Math.max(k * 4, 100) : k;
+		List<QdrantScoredPoint> scoredPoints = qdrantClient.search(collection, queryVector, filter, fetchLimit);
+
+		List<SearchHit> hits = scoredPoints.stream()
+				.map(chunkPointMapper::toSearchHit)
+				.toList();
+
+		if (pathPrefix != null && !pathPrefix.isBlank()) {
+			String normalizedPrefix = pathPrefix.replace('\\', '/').trim();
+			hits = hits.stream()
+					.filter(hit -> hit.path() != null && hit.path().startsWith(normalizedPrefix))
+					.toList();
+		}
+
+		return hits.stream()
+				.sorted(Comparator.comparingDouble(SearchHit::score).reversed())
+				.limit(k)
+				.toList();
+	}
+
+	/**
+	 * Deletes stale points belonging to the given repository from older indexing runs.
+	 *
+	 * @param repo repository reference
+	 * @param currentRunId the active run identifier to retain
+	 */
+	public void deleteStale(RepoRef repo, String currentRunId) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(currentRunId, "currentRunId must not be null");
+
+		Map<String, Object> filter = Map.of(
+				"must", List.of(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey()))),
+				"must_not", List.of(Map.of("key", "runId", "match", Map.of("value", currentRunId)))
+		);
+
+		log.info("Deleting stale points for repository {} not matching runId {}", repo.fullName(), currentRunId);
+		qdrantClient.deleteByFilter(properties.qdrant().collection(), filter);
+	}
+
+	/**
+	 * Deletes all points belonging to the specified repository.
+	 *
+	 * @param repo repository reference
+	 */
+	public void deleteRepo(RepoRef repo) {
+		Objects.requireNonNull(repo, "repo must not be null");
+
+		Map<String, Object> filter = Map.of(
+				"must", List.of(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())))
+		);
+
+		log.info("Deleting all points for repository {}", repo.fullName());
+		qdrantClient.deleteByFilter(properties.qdrant().collection(), filter);
+	}
+}

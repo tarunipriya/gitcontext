@@ -65,6 +65,20 @@ class GitContextPropertiesTest {
 			assertThat(chunking.minChunkTokens()).isEqualTo(40);
 			assertThat(chunking.overlapLines()).isEqualTo(5);
 			assertThat(chunking.fallbackWindowLines()).isEqualTo(60);
+
+			// Embedding defaults
+			GitContextProperties.EmbeddingProperties embedding = props.embedding();
+			assertThat(embedding).isNotNull();
+			assertThat(embedding.batchSize()).isEqualTo(32);
+			assertThat(embedding.queryPrefix()).isEqualTo("Represent this sentence for searching relevant passages: ");
+
+			// Qdrant defaults
+			GitContextProperties.QdrantProperties qdrant = props.qdrant();
+			assertThat(qdrant).isNotNull();
+			assertThat(qdrant.url()).isEqualTo("http://localhost:6333");
+			assertThat(qdrant.collection()).isEqualTo("gitcontext_chunks");
+			assertThat(qdrant.upsertBatchSize()).isEqualTo(128);
+			assertThat(qdrant.timeoutSeconds()).isEqualTo(30);
 		});
 	}
 
@@ -88,7 +102,12 @@ class GitContextPropertiesTest {
 				"gitcontext.chunking.max-chunk-tokens=256",
 				"gitcontext.chunking.min-chunk-tokens=20",
 				"gitcontext.chunking.overlap-lines=3",
-				"gitcontext.chunking.fallback-window-lines=40"
+				"gitcontext.chunking.fallback-window-lines=40",
+				"gitcontext.embedding.batch-size=16",
+				"gitcontext.embedding.query-prefix=Represent query:",
+				"gitcontext.qdrant.collection=custom_chunks",
+				"gitcontext.qdrant.upsert-batch-size=64",
+				"gitcontext.qdrant.timeout-seconds=45"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -115,6 +134,14 @@ class GitContextPropertiesTest {
 			assertThat(props.chunking().minChunkTokens()).isEqualTo(20);
 			assertThat(props.chunking().overlapLines()).isEqualTo(3);
 			assertThat(props.chunking().fallbackWindowLines()).isEqualTo(40);
+
+			assertThat(props.embedding().batchSize()).isEqualTo(16);
+			assertThat(props.embedding().queryPrefix()).isEqualTo("Represent query:");
+
+			assertThat(props.qdrant().url()).isEqualTo("http://qdrant.internal:6333");
+			assertThat(props.qdrant().collection()).isEqualTo("custom_chunks");
+			assertThat(props.qdrant().upsertBatchSize()).isEqualTo(64);
+			assertThat(props.qdrant().timeoutSeconds()).isEqualTo(45);
 		});
 	}
 
