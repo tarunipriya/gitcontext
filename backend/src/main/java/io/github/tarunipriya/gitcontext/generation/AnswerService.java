@@ -154,13 +154,15 @@ public class AnswerService {
 		String userPrompt = promptTemplates.buildUserPrompt(question, contextResult.formattedContext());
 
 		long genStart = System.currentTimeMillis();
-		LlmResponse llmResponse = llmClient.generate(new LlmRequest(systemInstruction, userPrompt));
+		LlmResponse llmResponse = llmClient.generate(new LlmRequest(systemInstruction, userPrompt, null, effectiveOptions.modelOverride()));
 		long generationMillis = System.currentTimeMillis() - genStart;
 		if (generationMillis > 20_000L) {
 			log.warn("Answer generation took {} ms (> 20 s) for question: '{}'", generationMillis, question);
 		}
 
-		String primaryModel = properties.llm().model();
+		String primaryModel = (effectiveOptions.modelOverride() != null && !effectiveOptions.modelOverride().isBlank())
+				? effectiveOptions.modelOverride()
+				: properties.llm().model();
 		if (llmResponse.model() != null && !llmResponse.model().equalsIgnoreCase(primaryModel)) {
 			warnings.add("Primary model '" + primaryModel + "' failed; used fallback model '" + llmResponse.model() + "'");
 		}

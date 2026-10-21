@@ -12,6 +12,7 @@ import java.util.List;
  * @param maxSources maximum sources to include in context (default: 8, valid range 1-12)
  * @param candidates number of candidate fused results to retrieve (default: 20)
  * @param excludePathPatterns path substrings to filter out from retrieved hits (e.g. "/demo/")
+ * @param modelOverride optional model name override for LLM generation (null uses default behavior)
  */
 public record AnswerOptions(
 		SearchMode mode,
@@ -19,7 +20,8 @@ public record AnswerOptions(
 		boolean rerank,
 		int maxSources,
 		int candidates,
-		List<String> excludePathPatterns
+		List<String> excludePathPatterns,
+		String modelOverride
 ) {
 	public static final int DEFAULT_MAX_SOURCES = 8;
 	public static final int DEFAULT_CANDIDATES = 20;
@@ -35,11 +37,15 @@ public record AnswerOptions(
 		excludePathPatterns = (excludePathPatterns != null) ? List.copyOf(excludePathPatterns) : List.of();
 	}
 
+	public AnswerOptions(SearchMode mode, boolean excludeTests, boolean rerank, int maxSources, int candidates, List<String> excludePathPatterns) {
+		this(mode, excludeTests, rerank, maxSources, candidates, excludePathPatterns, null);
+	}
+
 	public AnswerOptions(SearchMode mode, boolean excludeTests, boolean rerank, int maxSources, int candidates) {
-		this(mode, excludeTests, rerank, maxSources, candidates, List.of());
+		this(mode, excludeTests, rerank, maxSources, candidates, List.of(), null);
 	}
 
 	public static AnswerOptions defaults() {
-		return new AnswerOptions(SearchMode.HYBRID, true, false, DEFAULT_MAX_SOURCES, DEFAULT_CANDIDATES, List.of());
+		return new AnswerOptions(SearchMode.HYBRID, true, false, DEFAULT_MAX_SOURCES, DEFAULT_CANDIDATES, List.of(), null);
 	}
 }

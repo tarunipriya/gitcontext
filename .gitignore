@@ -31,3 +31,7 @@ Thumbs.db
 # Temporary command output files
 test-output.txt
 demo-output.txt
+
+# Evaluation checkpoints and stale runs
+eval/results/*.checkpoint.jsonl
+eval/results/*.stale

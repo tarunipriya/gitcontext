@@ -1,0 +1,27 @@
+spring:
+  main:
+    web-application-type: none
+
+gitcontext:
+  answer-eval:
+    dataset: eval/datasets/gitcontext.jsonl
+    repo: tarunipriya/gitcontext
+    reingest: true
+    output-dir: eval/results
+    # Delay between consecutive LLM calls (13000 ms matches free-tier Gemini rate limit of ~5 req/min).
+    # Can be lowered (e.g. to 1000-4000 ms) for paid accounts or higher API quotas.
+    request-delay-ms: 13000
+    judge-enabled: true
+    judge-max-source-chars: 6000
+    max-cases: 0
+    # Model used by the LLM judge to evaluate fact coverage and groundedness.
+    # Set to a separate model (e.g. gemini-3.5-flash-lite) from gitcontext.llm.model (e.g. gemini-3.5-flash)
+    # to distribute daily quota under free tier limits (20 requests/day per model).
+    # When blank (""), defaults to gitcontext.llm.model.
+    judge-model: gemini-3.5-flash-lite
+    # Maximum consecutive generation failures before failing fast (default: 3)
+    max-consecutive-failures: 3
+    # Resume from existing checkpoint if available with matching commit SHA and models (default: true)
+    resume: true
+    # Enforce using only gitcontext.llm.model without fallback during evaluation (default: true)
+    disable-fallback: true
