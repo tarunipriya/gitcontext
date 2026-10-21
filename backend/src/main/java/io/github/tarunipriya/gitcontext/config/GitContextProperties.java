@@ -72,7 +72,7 @@ public record GitContextProperties(
 			qdrantUrl = "http://localhost:6333";
 		}
 		if (ingestion == null) {
-			ingestion = new IngestionProperties(0, 0, 0, null, null, null, null, null);
+			ingestion = new IngestionProperties(0, 0, 0, null, null, null, null, null, null);
 		}
 		if (github == null) {
 			github = new GitHubProperties(null, 0, 0, 0, null, -1);
@@ -247,6 +247,7 @@ public record GitContextProperties(
 	 * @param maxCommits maximum number of commits to walk and ingest (default: 500)
 	 * @param maxDiffChars maximum character length for git diff output before truncation (default: 4000)
 	 * @param excludeDirs directory names to skip during working tree traversal
+	 * @param excludePathPrefixes path prefixes relative to repository root to skip during ingestion (default: eval/)
 	 * @param docExtensions file extensions classified as documentation documents
 	 * @param codeExtensions file extensions classified as source code documents
 	 * @param excludeLockFiles filenames of lock files to skip during ingestion
@@ -257,6 +258,7 @@ public record GitContextProperties(
 			@Min(1) @DefaultValue("500") int maxCommits,
 			@Min(1) @DefaultValue("4000") int maxDiffChars,
 			@NotNull @DefaultValue({".git", "node_modules", "target", "build", "dist", "out", ".idea", ".vscode", ".venv", "venv", "__pycache__", ".gradle", ".mvn", "vendor", "coverage"}) List<String> excludeDirs,
+			@NotNull @DefaultValue({"eval/"}) List<String> excludePathPrefixes,
 			@NotNull @DefaultValue({"md", "rst", "txt", "adoc"}) List<String> docExtensions,
 			@NotNull @DefaultValue({"java", "kt", "py", "js", "jsx", "ts", "tsx", "go", "rs", "c", "h", "cpp", "hpp", "cs", "rb", "php", "dart", "swift", "scala", "sql", "sh", "yml", "yaml", "toml", "json", "xml", "gradle"}) List<String> codeExtensions,
 			@NotNull @DefaultValue({"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"}) List<String> excludeLockFiles,
@@ -278,6 +280,7 @@ public record GitContextProperties(
 				maxDiffChars = DEFAULT_MAX_DIFF_CHARS;
 			}
 			excludeDirs = excludeDirs != null ? List.copyOf(excludeDirs) : DEFAULT_LISTS.getOrDefault("excludeDirs", List.of());
+			excludePathPrefixes = excludePathPrefixes != null ? List.copyOf(excludePathPrefixes) : DEFAULT_LISTS.getOrDefault("excludePathPrefixes", List.of("eval/"));
 			docExtensions = docExtensions != null ? List.copyOf(docExtensions) : DEFAULT_LISTS.getOrDefault("docExtensions", List.of());
 			codeExtensions = codeExtensions != null ? List.copyOf(codeExtensions) : DEFAULT_LISTS.getOrDefault("codeExtensions", List.of());
 			excludeLockFiles = excludeLockFiles != null ? List.copyOf(excludeLockFiles) : DEFAULT_LISTS.getOrDefault("excludeLockFiles", List.of());

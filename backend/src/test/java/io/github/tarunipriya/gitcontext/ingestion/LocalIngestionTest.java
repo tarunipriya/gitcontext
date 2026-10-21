@@ -210,7 +210,7 @@ class LocalIngestionTest {
 				reposDir,
 				"http://localhost:6333",
 				null,
-				new GitContextProperties.IngestionProperties(512, 500, 50, null, null, null, null, null),
+				new GitContextProperties.IngestionProperties(512, 500, 50, null, null, null, null, null, null),
 				null
 		);
 		CommitIngestor smallDiffIngestor = new CommitIngestor(smallDiffProps);

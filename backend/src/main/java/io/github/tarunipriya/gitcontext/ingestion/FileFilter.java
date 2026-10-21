@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>Filtering rules include:
  * <ul>
+ *   <li>Path prefix exclusion from repository root (e.g. {@code eval/})</li>
  *   <li>Directory exclusion (e.g. {@code node_modules}, {@code .git}, {@code target})</li>
  *   <li>Lock file exclusion (e.g. {@code package-lock.json}, {@code yarn.lock})</li>
  *   <li>Minified asset exclusion (e.g. {@code *.min.js}, {@code *.min.css})</li>
@@ -35,6 +36,7 @@ public class FileFilter {
 	private static final int BINARY_CHECK_BUFFER_SIZE = 8192;
 
 	private final GitContextProperties.IngestionProperties properties;
+	private final List<String> excludePathPrefixesLower;
 	private final Set<String> excludeDirsLower;
 	private final Set<String> excludeLockFilesLower;
 	private final Set<String> allowedExtensionsLower;
@@ -48,6 +50,26 @@ public class FileFilter {
 	public FileFilter(GitContextProperties properties) {
 		Objects.requireNonNull(properties, "properties must not be null");
 		this.properties = properties.ingestion();
+
+		List<String> prefixes = new ArrayList<>();
+		if (this.properties.excludePathPrefixes() != null) {
+			for (String prefix : this.properties.excludePathPrefixes()) {
+				if (prefix != null && !prefix.isBlank()) {
+					String normalized = prefix.replace('\\', '/').trim();
+					while (normalized.startsWith("./") || normalized.startsWith("/")) {
+						if (normalized.startsWith("./")) {
+							normalized = normalized.substring(2);
+						} else {
+							normalized = normalized.substring(1);
+						}
+					}
+					if (!normalized.isEmpty()) {
+						prefixes.add(normalized.toLowerCase(Locale.ROOT));
+					}
+				}
+			}
+		}
+		this.excludePathPrefixesLower = List.copyOf(prefixes);
 
 		this.excludeDirsLower = new HashSet<>();
 		for (String dir : this.properties.excludeDirs()) {
@@ -101,6 +123,23 @@ public class FileFilter {
 				: filePath;
 
 		String posixPath = relativePath.toString().replace('\\', '/');
+		String normalizedPosix = posixPath;
+		while (normalizedPosix.startsWith("./") || normalizedPosix.startsWith("/")) {
+			if (normalizedPosix.startsWith("./")) {
+				normalizedPosix = normalizedPosix.substring(2);
+			} else {
+				normalizedPosix = normalizedPosix.substring(1);
+			}
+		}
+		String normalizedPosixLower = normalizedPosix.toLowerCase(Locale.ROOT);
+
+		// 0. Check path prefix exclusion from repository root (e.g. eval/)
+		for (String prefix : excludePathPrefixesLower) {
+			if (normalizedPosixLower.startsWith(prefix)) {
+				return false;
+			}
+		}
+
 		String[] segments = posixPath.split("/");
 
 		// 1. Check excluded directory segments (all parent segments)

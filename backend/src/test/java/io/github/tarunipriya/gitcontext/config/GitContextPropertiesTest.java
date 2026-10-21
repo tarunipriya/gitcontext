@@ -43,6 +43,7 @@ class GitContextPropertiesTest {
 			assertThat(ingestion.maxCommits()).isEqualTo(500);
 			assertThat(ingestion.maxDiffChars()).isEqualTo(4000);
 			assertThat(ingestion.excludeDirs()).contains(".git", "node_modules", "target", "build", "dist", ".idea");
+			assertThat(ingestion.excludePathPrefixes()).containsExactly("eval/");
 			assertThat(ingestion.docExtensions()).contains("md", "rst", "txt", "adoc");
 			assertThat(ingestion.codeExtensions()).contains("java", "py", "ts", "go", "rs", "cpp");
 			assertThat(ingestion.excludeLockFiles()).contains("package-lock.json", "yarn.lock", "poetry.lock");
@@ -138,6 +139,7 @@ class GitContextPropertiesTest {
 				"gitcontext.ingestion.max-file-size-kb=1024",
 				"gitcontext.ingestion.max-commits=100",
 				"gitcontext.ingestion.max-diff-chars=2000",
+				"gitcontext.ingestion.exclude-path-prefixes=eval/,benchmarks/",
 				"gitcontext.github.api-base-url=https://github-enterprise.internal/api/v3",
 				"gitcontext.github.max-pull-requests=50",
 				"gitcontext.github.max-issues=75",
@@ -191,6 +193,7 @@ class GitContextPropertiesTest {
 			assertThat(props.ingestion().maxFileSizeKb()).isEqualTo(1024);
 			assertThat(props.ingestion().maxCommits()).isEqualTo(100);
 			assertThat(props.ingestion().maxDiffChars()).isEqualTo(2000);
+			assertThat(props.ingestion().excludePathPrefixes()).containsExactly("eval/", "benchmarks/");
 
 			assertThat(props.github().apiBaseUrl()).isEqualTo("https://github-enterprise.internal/api/v3");
 			assertThat(props.github().maxPullRequests()).isEqualTo(50);
