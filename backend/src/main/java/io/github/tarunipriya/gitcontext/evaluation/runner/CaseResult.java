@@ -1,6 +1,8 @@
 package io.github.tarunipriya.gitcontext.evaluation.runner;
 
 import io.github.tarunipriya.gitcontext.evaluation.QueryMetrics;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -35,7 +37,7 @@ public record CaseResult(
 		Objects.requireNonNull(variant, "variant must not be null");
 		retrievedPaths = (retrievedPaths != null) ? List.copyOf(retrievedPaths) : List.of();
 		expectedPaths = (expectedPaths != null) ? Set.copyOf(expectedPaths) : Set.of();
-		metricsByK = (metricsByK != null) ? Map.copyOf(metricsByK) : Map.of();
+		metricsByK = (metricsByK != null) ? Collections.unmodifiableMap(new LinkedHashMap<>(metricsByK)) : Map.of();
 		warnings = (warnings != null) ? List.copyOf(warnings) : List.of();
 	}
 }
