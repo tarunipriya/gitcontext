@@ -1,5 +1,7 @@
 package io.github.tarunipriya.gitcontext.api;
 
+import io.github.tarunipriya.gitcontext.generation.LlmRateLimitedException;
+import io.github.tarunipriya.gitcontext.generation.LlmUnavailableException;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantUnavailableException;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionQueueFullException;
 import java.util.stream.Collectors;
@@ -90,6 +92,38 @@ public class ApiExceptionHandler {
 		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
 				.header(HttpHeaders.RETRY_AFTER, "60")
 				.body(problem);
+	}
+
+	/**
+	 * Handles LLM service unavailability (missing API key, invalid key or model) with 503.
+	 */
+	@ExceptionHandler(LlmUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleLlmUnavailableException(LlmUnavailableException ex) {
+		log.warn("LLM service unavailable: {}", ex.getMessage());
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.SERVICE_UNAVAILABLE,
+				ex.getMessage()
+		);
+		problem.setTitle("Service Unavailable");
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
+	}
+
+	/**
+	 * Handles LLM rate limiting (HTTP 429) after exhausting retries, optionally including Retry-After header.
+	 */
+	@ExceptionHandler(LlmRateLimitedException.class)
+	public ResponseEntity<ProblemDetail> handleLlmRateLimitedException(LlmRateLimitedException ex) {
+		log.warn("LLM service rate limited: {}", ex.getMessage());
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.TOO_MANY_REQUESTS,
+				ex.getMessage()
+		);
+		problem.setTitle("Rate Limit Exceeded");
+		ResponseEntity.BodyBuilder builder = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
+		if (ex.retryAfterSeconds() != null && ex.retryAfterSeconds() > 0) {
+			builder.header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.retryAfterSeconds()));
+		}
+		return builder.body(problem);
 	}
 
 	/**
