@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitContextPropertiesTest {
 
@@ -125,6 +126,19 @@ class GitContextPropertiesTest {
 			assertThat(demo).isNotNull();
 			assertThat(demo.repo()).isEqualTo("tarunipriya/gitcontext");
 			assertThat(demo.forceReingest()).isFalse();
+
+			// Eval defaults
+			GitContextProperties.EvalProperties eval = props.eval();
+			assertThat(eval).isNotNull();
+			assertThat(eval.dataset()).isEqualTo("eval/datasets/gitcontext.jsonl");
+			assertThat(eval.repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(eval.ks()).containsExactly(1, 3, 5, 10);
+			assertThat(eval.maxK()).isEqualTo(10);
+			assertThat(eval.variants()).containsExactly("VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK");
+			assertThat(eval.excludeTests()).isFalse();
+			assertThat(eval.reingest()).isTrue();
+			assertThat(eval.warmupQueries()).isEqualTo(1);
+			assertThat(eval.outputDir()).isEqualTo("eval/results");
 		});
 	}
 
@@ -178,7 +192,15 @@ class GitContextPropertiesTest {
 				"gitcontext.llm.max-retries=3",
 				"gitcontext.llm.thinking-level=medium",
 				"gitcontext.demo.repo=custom/demo-repo",
-				"gitcontext.demo.force-reingest=true"
+				"gitcontext.demo.force-reingest=true",
+				"gitcontext.eval.dataset=eval/datasets/smoke.jsonl",
+				"gitcontext.eval.repo=custom/test-repo",
+				"gitcontext.eval.ks=1,5",
+				"gitcontext.eval.variants=HYBRID,HYBRID_RERANK",
+				"gitcontext.eval.exclude-tests=true",
+				"gitcontext.eval.reingest=false",
+				"gitcontext.eval.warmup-queries=0",
+				"gitcontext.eval.output-dir=eval/custom-output"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -243,6 +265,16 @@ class GitContextPropertiesTest {
 
 			assertThat(props.demo().repo()).isEqualTo("custom/demo-repo");
 			assertThat(props.demo().forceReingest()).isTrue();
+
+			assertThat(props.eval().dataset()).isEqualTo("eval/datasets/smoke.jsonl");
+			assertThat(props.eval().repo()).isEqualTo("custom/test-repo");
+			assertThat(props.eval().ks()).containsExactly(1, 5);
+			assertThat(props.eval().maxK()).isEqualTo(5);
+			assertThat(props.eval().variants()).containsExactly("HYBRID", "HYBRID_RERANK");
+			assertThat(props.eval().excludeTests()).isTrue();
+			assertThat(props.eval().reingest()).isFalse();
+			assertThat(props.eval().warmupQueries()).isEqualTo(0);
+			assertThat(props.eval().outputDir()).isEqualTo("eval/custom-output");
 		});
 	}
 
@@ -266,6 +298,49 @@ class GitContextPropertiesTest {
 			assertThat(props.demo()).isNotNull();
 			assertThat(props.demo().repo()).isEqualTo("test/custom-demo-repo");
 			assertThat(props.demo().forceReingest()).isTrue();
+		});
+	}
+
+	@Test
+	@DisplayName("Eval properties bind default and custom values")
+	void testEvalPropertiesBinding() {
+		runner.run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.eval()).isNotNull();
+			assertThat(props.eval().dataset()).isEqualTo("eval/datasets/gitcontext.jsonl");
+			assertThat(props.eval().repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(props.eval().ks()).containsExactly(1, 3, 5, 10);
+			assertThat(props.eval().maxK()).isEqualTo(10);
+			assertThat(props.eval().variants()).containsExactly("VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK");
+			assertThat(props.eval().excludeTests()).isFalse();
+			assertThat(props.eval().reingest()).isTrue();
+			assertThat(props.eval().warmupQueries()).isEqualTo(1);
+			assertThat(props.eval().outputDir()).isEqualTo("eval/results");
+		});
+
+		runner.withPropertyValues(
+				"gitcontext.eval.dataset=eval/datasets/smoke.jsonl",
+				"gitcontext.eval.repo=test/custom-eval-repo",
+				"gitcontext.eval.ks=3,7",
+				"gitcontext.eval.variants=VECTOR,HYBRID",
+				"gitcontext.eval.exclude-tests=true",
+				"gitcontext.eval.reingest=false",
+				"gitcontext.eval.warmup-queries=2",
+				"gitcontext.eval.output-dir=eval/out"
+		).run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.eval()).isNotNull();
+			assertThat(props.eval().dataset()).isEqualTo("eval/datasets/smoke.jsonl");
+			assertThat(props.eval().repo()).isEqualTo("test/custom-eval-repo");
+			assertThat(props.eval().ks()).containsExactly(3, 7);
+			assertThat(props.eval().maxK()).isEqualTo(7);
+			assertThat(props.eval().variants()).containsExactly("VECTOR", "HYBRID");
+			assertThat(props.eval().excludeTests()).isTrue();
+			assertThat(props.eval().reingest()).isFalse();
+			assertThat(props.eval().warmupQueries()).isEqualTo(2);
+			assertThat(props.eval().outputDir()).isEqualTo("eval/out");
 		});
 	}
 
@@ -311,5 +386,75 @@ class GitContextPropertiesTest {
 		String unconfiguredOutput = withoutSecrets.toString();
 		assertThat(unconfiguredOutput).contains("githubToken=<not set>");
 		assertThat(unconfiguredOutput).contains("llmApiKey=<not set>");
+	}
+
+	@Test
+	@DisplayName("resolveToRepoRoot('eval/results') stays inside repo root and ends with eval/results")
+	void testResolveToRepoRootEvalResults() {
+		Path repoRoot = GitContextProperties.resolveToRepoRoot(Path.of(""));
+		Path resolved = GitContextProperties.resolveToRepoRoot(Path.of("eval/results"));
+
+		assertThat(resolved).startsWith(repoRoot);
+		assertThat(resolved.toString().replace('\\', '/')).endsWith("eval/results");
+		assertThat(resolved.toString()).doesNotContain("..");
+	}
+
+	@Test
+	@DisplayName("EvalProperties validates cutoff ranks ks: non-empty, every k > 0, duplicates removed")
+	void testEvalPropertiesKsValidation() {
+		// Empty ks throws
+		assertThatThrownBy(() -> new GitContextProperties.EvalProperties(
+				"eval/datasets/gitcontext.jsonl",
+				"tarunipriya/gitcontext",
+				List.of(),
+				List.of("VECTOR"),
+				false,
+				true,
+				1,
+				"eval/results"
+		))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("Cutoff ranks ks must not be empty");
+
+		// Non-positive k throws
+		assertThatThrownBy(() -> new GitContextProperties.EvalProperties(
+				"eval/datasets/gitcontext.jsonl",
+				"tarunipriya/gitcontext",
+				List.of(1, 0, 5),
+				List.of("VECTOR"),
+				false,
+				true,
+				1,
+				"eval/results"
+		))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("Cutoff rank k must be greater than 0");
+
+		assertThatThrownBy(() -> new GitContextProperties.EvalProperties(
+				"eval/datasets/gitcontext.jsonl",
+				"tarunipriya/gitcontext",
+				List.of(-2),
+				List.of("VECTOR"),
+				false,
+				true,
+				1,
+				"eval/results"
+		))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("Cutoff rank k must be greater than 0");
+
+		// Duplicates are removed
+		GitContextProperties.EvalProperties props = new GitContextProperties.EvalProperties(
+				"eval/datasets/gitcontext.jsonl",
+				"tarunipriya/gitcontext",
+				List.of(5, 1, 5, 10, 1),
+				List.of("VECTOR"),
+				false,
+				true,
+				1,
+				"eval/results"
+		);
+		assertThat(props.ks()).containsExactly(5, 1, 10);
+		assertThat(props.maxK()).isEqualTo(10);
 	}
 }
