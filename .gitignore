@@ -27,3 +27,7 @@ node_modules/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Temporary command output files
+test-output.txt
+demo-output.txt
