@@ -7,6 +7,7 @@ import io.github.tarunipriya.gitcontext.indexing.SearchHit;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
+import io.github.tarunipriya.gitcontext.retrieval.FusionWeights;
 import io.github.tarunipriya.gitcontext.retrieval.HybridSearchHit;
 import io.github.tarunipriya.gitcontext.retrieval.HybridSearchResult;
 import io.github.tarunipriya.gitcontext.retrieval.HybridSearchService;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -95,9 +97,9 @@ class RetrievalEvaluatorTest {
 		// VECTOR variant:
 		// q1 returns ["src/A.java"] -> Hit@1 = 1.0
 		// q2 returns ["src/Other.java", "src/B.java"] -> Hit@1 = 0.0, Hit@3 = 1.0
-		when(searchService.search(eq(repo), eq("q1"), eq(3), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false)))
+		when(searchService.search(eq(repo), eq("q1"), eq(3), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/A.java"), false, 40L));
-		when(searchService.search(eq(repo), eq("q2"), eq(3), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false)))
+		when(searchService.search(eq(repo), eq("q2"), eq(3), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/Other.java", "src/B.java"), false, 60L));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -140,7 +142,7 @@ class RetrievalEvaluatorTest {
 		EvalCase case2 = new EvalCase("case-002", "q2", List.of("src/B.java"), List.of(), "cat", true);
 		EvalDataset dataset = new EvalDataset("warmup-ds", List.of(case1, case2));
 
-		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/A.java"), false, 30L));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -157,7 +159,7 @@ class RetrievalEvaluatorTest {
 
 		// Total searches: 2 warmup + 2 cases = 4 calls to searchService
 		verify(searchService, times(4))
-				.search(eq(repo), any(), eq(1), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false));
+				.search(eq(repo), any(), eq(1), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false), nullable(FusionWeights.class));
 
 		VariantReport vr = report.variants().get(0);
 		// Warmup searches must NOT be present in case results or latency stats
@@ -174,7 +176,7 @@ class RetrievalEvaluatorTest {
 		EvalCase unans2 = new EvalCase("unans-2", "q-unans-2", List.of(), List.of(), "cat", false);
 		EvalDataset dataset = new EvalDataset("mixed-ds", List.of(ans1, unans1, ans2, unans2));
 
-		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/Main.java"), false, 25L));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -193,10 +195,10 @@ class RetrievalEvaluatorTest {
 		assertThat(report.skippedUnanswerable()).isEqualTo(2);
 
 		// Verified that only answerable questions were searched
-		verify(searchService, times(1)).search(eq(repo), eq("q-ans-1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean());
-		verify(searchService, times(1)).search(eq(repo), eq("q-ans-2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean());
-		verify(searchService, times(0)).search(eq(repo), eq("q-unans-1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean());
-		verify(searchService, times(0)).search(eq(repo), eq("q-unans-2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean());
+		verify(searchService, times(1)).search(eq(repo), eq("q-ans-1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class));
+		verify(searchService, times(1)).search(eq(repo), eq("q-ans-2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class));
+		verify(searchService, times(0)).search(eq(repo), eq("q-unans-1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class));
+		verify(searchService, times(0)).search(eq(repo), eq("q-unans-2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class));
 	}
 
 	@Test
@@ -206,7 +208,7 @@ class RetrievalEvaluatorTest {
 		EvalCase case2 = new EvalCase("case-002", "q2", List.of("src/Missing2.java"), List.of(), "cat", true);
 		EvalDataset dataset = new EvalDataset("missing-ds", List.of(case1, case2));
 
-		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/Existing.java"), false, 30L));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -242,9 +244,9 @@ class RetrievalEvaluatorTest {
 		EvalCase case2 = new EvalCase("case-002", "q2", List.of("src/B.java"), List.of(), "cat", true);
 		EvalDataset dataset = new EvalDataset("throw-ds", List.of(case1, case2));
 
-		when(searchService.search(eq(repo), eq("q1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(eq(repo), eq("q1"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/A.java"), false, 50L));
-		when(searchService.search(eq(repo), eq("q2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(eq(repo), eq("q2"), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenThrow(new RuntimeException("Qdrant connection timeout"));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -298,7 +300,7 @@ class RetrievalEvaluatorTest {
 				.hasMessageContaining("Cutoff rank k must be greater than 0");
 
 		// 3. Duplicates removed
-		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean()))
+		when(searchService.search(any(), any(), anyInt(), any(), any(), any(), anyBoolean(), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/A.java"), false, 20L));
 
 		EvalReport report = evaluator.evaluate(
@@ -315,7 +317,7 @@ class RetrievalEvaluatorTest {
 		EvalDataset dataset = new EvalDataset("rerank-ds", List.of(case1));
 
 		// Returns reranked = false
-		when(searchService.search(any(), any(), anyInt(), any(), any(), eq(SearchMode.HYBRID), eq(true), anyBoolean()))
+		when(searchService.search(any(), any(), anyInt(), any(), any(), eq(SearchMode.HYBRID), eq(true), anyBoolean(), nullable(FusionWeights.class)))
 				.thenReturn(createResult(List.of("src/A.java"), false, 80L));
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -386,7 +388,7 @@ class RetrievalEvaluatorTest {
 				10L
 		);
 
-		when(searchService.search(eq(repo), eq("Which PR fixed bug 7?"), eq(1), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false)))
+		when(searchService.search(eq(repo), eq("Which PR fixed bug 7?"), eq(1), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false), nullable(FusionWeights.class)))
 				.thenReturn(result);
 
 		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
@@ -409,5 +411,32 @@ class RetrievalEvaluatorTest {
 		assertThat(cr.metricsByK().get(1).recallAtK()).isEqualTo(1.0);
 		assertThat(report.missingExpectedPaths()).isEmpty();
 		assertThat(cr.warnings()).isEmpty();
+	}
+
+	@Test
+	@DisplayName("Weighted variant passes FusionWeights(1.0, keywordWeight) to searchService")
+	void testWeightedVariant_passesFusionWeightsToSearchService() {
+		EvalCase case1 = new EvalCase("case-001", "q1", List.of("src/A.java"), List.of(), "cat", true);
+		EvalDataset dataset = new EvalDataset("weight-ds", List.of(case1));
+
+		when(searchService.search(eq(repo), eq("q1"), eq(5), any(), any(), eq(SearchMode.HYBRID), eq(false), eq(false), eq(new FusionWeights(1.0, 0.5))))
+				.thenReturn(createResult(List.of("src/A.java"), false, 35L));
+
+		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
+		EvalVariant variant = EvalVariant.parse("HYBRID:kw=0.5");
+		EvalReport report = evaluator.evaluate(
+				dataset,
+				repo,
+				List.of("src/A.java"),
+				"sha",
+				List.of(variant),
+				List.of(5),
+				false,
+				0
+		);
+
+		assertThat(report.variants()).hasSize(1);
+		assertThat(report.variants().get(0).variant().label()).isEqualTo("HYBRID:kw=0.5");
+		verify(searchService).search(eq(repo), eq("q1"), eq(5), any(), any(), eq(SearchMode.HYBRID), eq(false), eq(false), eq(new FusionWeights(1.0, 0.5)));
 	}
 }

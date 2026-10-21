@@ -8,6 +8,7 @@ import io.github.tarunipriya.gitcontext.evaluation.SourceKeys;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalCase;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalDataset;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
+import io.github.tarunipriya.gitcontext.retrieval.FusionWeights;
 import io.github.tarunipriya.gitcontext.retrieval.HybridSearchResult;
 import io.github.tarunipriya.gitcontext.retrieval.HybridSearchService;
 import java.time.Instant;
@@ -119,7 +120,11 @@ public class RetrievalEvaluator {
 		List<VariantReport> variantReports = new ArrayList<>();
 
 		for (EvalVariant variant : variants) {
-			log.info("Evaluating variant: {} (mode={}, rerank={})", variant, variant.mode(), variant.rerank());
+			log.info("Evaluating variant: {} (mode={}, rerank={})", variant.label(), variant.mode().mode(), variant.mode().rerank());
+
+			FusionWeights weights = (variant.keywordWeight() != null)
+					? new FusionWeights(1.0, variant.keywordWeight())
+					: null;
 
 			// Warmup searches
 			if (!answerableCases.isEmpty() && warmupQueries > 0) {
@@ -132,12 +137,13 @@ public class RetrievalEvaluator {
 								maxK,
 								null,
 								null,
-								variant.mode(),
-								variant.rerank(),
-								excludeTests
+								variant.mode().mode(),
+								variant.mode().rerank(),
+								excludeTests,
+								weights
 						);
 					} catch (Exception e) {
-						log.warn("Warmup query {} failed for variant {}: {}", w + 1, variant, e.getMessage());
+						log.warn("Warmup query {} failed for variant {}: {}", w + 1, variant.label(), e.getMessage());
 					}
 				}
 			}
@@ -168,16 +174,17 @@ public class RetrievalEvaluator {
 							maxK,
 							null,
 							null,
-							variant.mode(),
-							variant.rerank(),
-							excludeTests
+							variant.mode().mode(),
+							variant.mode().rerank(),
+							excludeTests,
+							weights
 					);
 
 					if (result.warnings() != null) {
 						caseWarnings.addAll(result.warnings());
 					}
 
-					if (variant == EvalVariant.HYBRID_RERANK && !result.reranked()) {
+					if (variant.mode() == EvalMode.HYBRID_RERANK && !result.reranked()) {
 						caseWarnings.add("Reranker was requested for HYBRID_RERANK but was not applied by search service");
 						if (!loggedRerankWarning) {
 							log.warn("Reranker was requested for HYBRID_RERANK but reranked=false was returned (reranker disabled in config)");
@@ -213,7 +220,7 @@ public class RetrievalEvaluator {
 							caseWarnings
 					);
 				} catch (Exception e) {
-					log.warn("Search exception for case '{}' under variant {}: {}", evalCase.id(), variant, e.getMessage());
+					log.warn("Search exception for case '{}' under variant {}: {}", evalCase.id(), variant.label(), e.getMessage());
 					caseWarnings.add("Search exception: " + e.getMessage());
 					failedCases++;
 

@@ -48,7 +48,9 @@ class HybridSearchServiceTest {
 		GitContextProperties.HybridProperties hybridProps = new GitContextProperties.HybridProperties(
 				50,
 				60,
-				SearchMode.HYBRID
+				SearchMode.HYBRID,
+				1.0,
+				1.0
 		);
 		GitContextProperties.RerankProperties rerankProps = new GitContextProperties.RerankProperties(
 				false,
@@ -360,6 +362,42 @@ class HybridSearchServiceTest {
 		// The non-test paths in order: c2, c4, c6, c8, c9
 		List<String> chunkIds = result.hits().stream().map(h -> h.hit().chunkId()).toList();
 		assertThat(chunkIds).containsExactly("c2", "c4", "c6", "c8", "c9");
+	}
+
+	@Test
+	@DisplayName("search overload with FusionWeights passes weights through to change fused order")
+	void search_hybridMode_withCustomFusionWeights_passesWeightsThrough() {
+		// Vector: c1 (rank 1), c2 (rank 2)
+		SearchHit hit1 = createHit("c1", 0.95, "sym1");
+		SearchHit hit2 = createHit("c2", 0.85, "sym2");
+		when(vectorStore.search(eq(repo), eq("weightQuery"), eq(50), any(), any()))
+				.thenReturn(List.of(hit1, hit2));
+
+		// Keyword: c2 (rank 1), c3 (rank 2), c1 (rank 3)
+		when(keywordIndex.exists(repo)).thenReturn(true);
+		SearchHit hit2Key = createHit("c2", 25.0, "sym2");
+		SearchHit hit3Key = createHit("c3", 20.0, "sym3");
+		SearchHit hit1Key = createHit("c1", 10.0, "sym1");
+		when(keywordIndex.search(eq(repo), eq("weightQuery"), eq(50), any(), any()))
+				.thenReturn(List.of(hit2Key, hit3Key, hit1Key));
+
+		// 1. With default weights (null weights -> 1.0, 1.0), c2 outranks c1:
+		// c2: 1/62 + 1/61 ≈ 0.03252
+		// c1: 1/61 + 1/63 ≈ 0.03227
+		HybridSearchResult defaultResult = hybridSearchService.search(
+				repo, "weightQuery", 5, null, null, SearchMode.HYBRID, false, false, null);
+		List<String> defaultOrder = defaultResult.hits().stream().map(h -> h.hit().chunkId()).toList();
+		assertThat(defaultOrder).containsExactly("c2", "c1", "c3");
+
+		// 2. With vectorWeight=1.0 and keywordWeight=0.0, vector ranks dominate:
+		// c1: 1/61 + 0 = 0.01639
+		// c2: 1/62 + 0 = 0.01613
+		// c3: 0 + 0 = 0.0
+		FusionWeights customWeights = new FusionWeights(1.0, 0.0);
+		HybridSearchResult weightedResult = hybridSearchService.search(
+				repo, "weightQuery", 5, null, null, SearchMode.HYBRID, false, false, customWeights);
+		List<String> weightedOrder = weightedResult.hits().stream().map(h -> h.hit().chunkId()).toList();
+		assertThat(weightedOrder).containsExactly("c1", "c2", "c3");
 	}
 
 	private SearchHit createHitWithPath(String chunkId, String path) {

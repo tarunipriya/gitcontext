@@ -79,6 +79,8 @@ public class EvalRunner implements CommandLineRunner {
 		List<EvalVariant> variants = evalProps.variants().stream()
 				.map(EvalVariant::parse)
 				.toList();
+		log.info("Configured evaluation variants ({}): {}", variants.size(),
+				variants.stream().map(EvalVariant::label).toList());
 
 		Collection<String> indexedPaths = null;
 		String indexedCommitSha = "existing-index";

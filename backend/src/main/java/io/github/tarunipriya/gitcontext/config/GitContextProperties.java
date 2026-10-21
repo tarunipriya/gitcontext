@@ -103,12 +103,14 @@ public record GitContextProperties(
 			keyword = new KeywordProperties(effectiveDir, sb, psb, pb);
 		}
 		if (hybrid == null) {
-			hybrid = new HybridProperties(50, 60, SearchMode.HYBRID);
+			hybrid = new HybridProperties(50, 60, SearchMode.HYBRID, 1.0, 1.0);
 		} else {
 			int c = hybrid.candidates() > 0 ? hybrid.candidates() : 50;
 			int k = hybrid.rrfK() > 0 ? hybrid.rrfK() : 60;
 			SearchMode m = hybrid.defaultMode() != null ? hybrid.defaultMode() : SearchMode.HYBRID;
-			hybrid = new HybridProperties(c, k, m);
+			double vw = hybrid.vectorWeight();
+			double kw = hybrid.keywordWeight();
+			hybrid = new HybridProperties(c, k, m, vw, kw);
 		}
 		if (rerank == null) {
 			rerank = new RerankProperties(
@@ -556,11 +558,15 @@ public record GitContextProperties(
 	 * @param candidates number of candidate results fetched from each retriever before rank fusion (default: 50)
 	 * @param rrfK smoothing constant k for Reciprocal Rank Fusion scoring (default: 60)
 	 * @param defaultMode default search mode when not explicitly requested (default: HYBRID)
+	 * @param vectorWeight weight multiplier applied to vector reciprocal rank scores (default: 1.0)
+	 * @param keywordWeight weight multiplier applied to keyword reciprocal rank scores (default: 1.0)
 	 */
 	public record HybridProperties(
 			@Min(1) @DefaultValue("50") int candidates,
 			@Min(1) @DefaultValue("60") int rrfK,
-			@NotNull @DefaultValue("HYBRID") SearchMode defaultMode
+			@NotNull @DefaultValue("HYBRID") SearchMode defaultMode,
+			@Min(0) @DefaultValue("1.0") double vectorWeight,
+			@Min(0) @DefaultValue("1.0") double keywordWeight
 	) {
 		public HybridProperties {
 			if (candidates <= 0) {
@@ -571,6 +577,15 @@ public record GitContextProperties(
 			}
 			if (defaultMode == null) {
 				defaultMode = SearchMode.HYBRID;
+			}
+			if (!Double.isFinite(vectorWeight) || vectorWeight < 0) {
+				throw new IllegalArgumentException("vectorWeight must be finite and >= 0, got " + vectorWeight);
+			}
+			if (!Double.isFinite(keywordWeight) || keywordWeight < 0) {
+				throw new IllegalArgumentException("keywordWeight must be finite and >= 0, got " + keywordWeight);
+			}
+			if (vectorWeight == 0.0 && keywordWeight == 0.0) {
+				throw new IllegalArgumentException("vectorWeight and keywordWeight cannot both be 0");
 			}
 		}
 	}

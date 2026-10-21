@@ -1,90 +1,125 @@
 package io.github.tarunipriya.gitcontext.evaluation.runner;
 
-import io.github.tarunipriya.gitcontext.retrieval.SearchMode;
-import java.util.Arrays;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Objects;
 
 /**
- * Search evaluation variants comparing different retrieval strategies and reranking configurations.
+ * Evaluation variant pairing a descriptive label and execution {@link EvalMode}
+ * with an optional keyword score weight multiplier.
+ *
+ * @param label formatted, normalized variant label (e.g. "VECTOR", "HYBRID:kw=0.5")
+ * @param mode underlying evaluation search mode (retrieval strategy and reranking behavior)
+ * @param keywordWeight optional reciprocal rank keyword weight multiplier (null indicates config default)
  */
-public enum EvalVariant {
+public record EvalVariant(
+		@JsonValue String label,
+		EvalMode mode,
+		Double keywordWeight
+) {
 
-	/**
-	 * Dense semantic vector similarity search via Qdrant without reranking.
-	 */
-	VECTOR(SearchMode.VECTOR, false),
+	private static final String VALID_FORMAT_DESCRIPTION =
+			"VECTOR, KEYWORD, HYBRID[:kw=<number>], HYBRID_RERANK[:kw=<number>]";
 
-	/**
-	 * Sparse lexical BM25 keyword search via Apache Lucene without reranking.
-	 */
-	KEYWORD(SearchMode.KEYWORD, false),
+	public static final EvalVariant VECTOR = new EvalVariant("VECTOR", EvalMode.VECTOR, null);
+	public static final EvalVariant KEYWORD = new EvalVariant("KEYWORD", EvalMode.KEYWORD, null);
+	public static final EvalVariant HYBRID = new EvalVariant("HYBRID", EvalMode.HYBRID, null);
+	public static final EvalVariant HYBRID_RERANK = new EvalVariant("HYBRID_RERANK", EvalMode.HYBRID_RERANK, null);
 
-	/**
-	 * Combined hybrid retrieval fusing vector and keyword rankings via Reciprocal Rank Fusion (RRF) without reranking.
-	 */
-	HYBRID(SearchMode.HYBRID, false),
-
-	/**
-	 * Combined hybrid retrieval followed by cross-encoder neural reranking.
-	 */
-	HYBRID_RERANK(SearchMode.HYBRID, true);
-
-	private final SearchMode mode;
-	private final boolean rerank;
-
-	EvalVariant(SearchMode mode, boolean rerank) {
-		this.mode = mode;
-		this.rerank = rerank;
+	public EvalVariant {
+		Objects.requireNonNull(label, "label must not be null");
+		Objects.requireNonNull(mode, "mode must not be null");
+		if (keywordWeight != null) {
+			if (!Double.isFinite(keywordWeight) || keywordWeight < 0) {
+				throw new IllegalArgumentException("keywordWeight must be finite and >= 0, got " + keywordWeight);
+			}
+		}
 	}
 
 	/**
-	 * Returns the underlying {@link SearchMode} executed by this variant.
+	 * Parses an evaluation variant descriptor case-insensitively.
 	 *
-	 * @return search mode
-	 */
-	public SearchMode mode() {
-		return mode;
-	}
-
-	/**
-	 * Returns whether cross-encoder reranking is requested for this variant.
+	 * <p>Accepts base variants {@code "VECTOR"}, {@code "KEYWORD"}, {@code "HYBRID"}, and {@code "HYBRID_RERANK"}.
+	 * For {@code HYBRID} and {@code HYBRID_RERANK} only, an optional suffix {@code ":kw=<number>"} may be provided,
+	 * specifying a custom keyword reciprocal rank weight (e.g. {@code "HYBRID:kw=0.5"}).
 	 *
-	 * @return true if reranking is enabled
+	 * @param value raw variant descriptor string
+	 * @return parsed {@link EvalVariant}
+	 * @throws IllegalArgumentException if the descriptor is null, blank, has an invalid suffix, or is unknown
 	 */
-	public boolean rerank() {
-		return rerank;
-	}
-
-	/**
-	 * Parses an evaluation variant name case-insensitively.
-	 *
-	 * @param value raw variant name string
-	 * @return matching {@link EvalVariant}
-	 * @throws IllegalArgumentException if null, blank, or an unknown variant name
-	 */
+	@JsonCreator
 	public static EvalVariant parse(String value) {
 		if (value == null || value.isBlank()) {
 			throw new IllegalArgumentException(
-					"Evaluation variant must not be null or blank. Valid values: " + Arrays.toString(values()));
+					"Evaluation variant must not be null or blank. Valid formats: " + VALID_FORMAT_DESCRIPTION);
 		}
-		String normalized = value.trim().toUpperCase();
-		for (EvalVariant variant : values()) {
-			if (variant.name().equals(normalized)) {
-				return variant;
-			}
+		String trimmed = value.trim();
+		int colonIdx = trimmed.indexOf(':');
+
+		if (colonIdx < 0) {
+			String upper = trimmed.toUpperCase();
+			return switch (upper) {
+				case "VECTOR" -> VECTOR;
+				case "KEYWORD" -> KEYWORD;
+				case "HYBRID" -> HYBRID;
+				case "HYBRID_RERANK" -> HYBRID_RERANK;
+				default -> throw new IllegalArgumentException(
+						"Unknown evaluation variant: '" + value + "'. Valid formats: " + VALID_FORMAT_DESCRIPTION);
+			};
 		}
-		throw new IllegalArgumentException(
-				"Unknown evaluation variant: '" + value + "'. Valid values are: " + Arrays.toString(values()));
+
+		String base = trimmed.substring(0, colonIdx).trim().toUpperCase();
+		String suffix = trimmed.substring(colonIdx + 1).trim();
+
+		if (!base.equals("HYBRID") && !base.equals("HYBRID_RERANK")) {
+			throw new IllegalArgumentException(
+					"Suffix ':kw=' is only supported on HYBRID and HYBRID_RERANK, got: '" + value
+							+ "'. Valid formats: " + VALID_FORMAT_DESCRIPTION);
+		}
+
+		if (!suffix.toLowerCase().startsWith("kw=")) {
+			throw new IllegalArgumentException(
+					"Invalid variant suffix in: '" + value + "'. Expected ':kw=<number>'. Valid formats: "
+							+ VALID_FORMAT_DESCRIPTION);
+		}
+
+		String numStr = suffix.substring(3).trim();
+		if (numStr.isEmpty()) {
+			throw new IllegalArgumentException(
+					"Keyword weight number is missing in: '" + value + "'. Valid formats: " + VALID_FORMAT_DESCRIPTION);
+		}
+
+		double weight;
+		try {
+			weight = Double.parseDouble(numStr);
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException(
+					"Invalid keyword weight number in: '" + value + "': '" + numStr + "'. Expected a valid number >= 0", e);
+		}
+
+		if (!Double.isFinite(weight) || weight < 0) {
+			throw new IllegalArgumentException(
+					"Keyword weight must be finite and >= 0, got: " + weight + " in '" + value + "'");
+		}
+
+		EvalMode mode = EvalMode.valueOf(base);
+		String normalizedLabel = base + ":kw=" + numStr;
+		return new EvalVariant(normalizedLabel, mode, weight);
 	}
 
 	/**
 	 * Alias for {@link #parse(String)} providing standard Java naming convention.
 	 *
-	 * @param value raw variant name string
-	 * @return matching {@link EvalVariant}
-	 * @throws IllegalArgumentException if null, blank, or an unknown variant name
+	 * @param value raw variant descriptor string
+	 * @return parsed {@link EvalVariant}
+	 * @throws IllegalArgumentException if the descriptor is invalid
 	 */
 	public static EvalVariant fromString(String value) {
 		return parse(value);
+	}
+
+	@Override
+	public String toString() {
+		return label;
 	}
 }
