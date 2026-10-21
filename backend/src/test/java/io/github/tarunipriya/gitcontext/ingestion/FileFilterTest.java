@@ -133,7 +133,7 @@ class FileFilterTest {
 				null,
 				new GitContextProperties.IngestionProperties(
 						512, 500, 4000,
-						null, null, null, null,
+						null, null, null, null, null,
 						java.util.List.of("*.bundle.js")
 				),
 				null
@@ -150,5 +150,102 @@ class FileFilterTest {
 
 		assertThat(customFilter.shouldIngest(tempDir, bundleFile)).isFalse();
 		assertThat(customFilter.shouldIngest(tempDir, normalFile)).isTrue();
+	}
+
+	@Test
+	@DisplayName("Rejects root eval/ files by default prefix configuration")
+	void testRejectsRootEvalFile() throws IOException {
+		Path evalDataset = tempDir.resolve("eval/datasets/smoke.jsonl");
+		Files.createDirectories(evalDataset.getParent());
+		Files.writeString(evalDataset, "{\"id\":\"c1\",\"question\":\"q\",\"expectedPaths\":[\"a.java\"],\"expectedFacts\":[],\"category\":\"gen\",\"answerable\":true}");
+
+		Path evalReadme = tempDir.resolve("eval/README.md");
+		Files.writeString(evalReadme, "# Eval Docs");
+
+		assertThat(fileFilter.shouldIngest(tempDir, evalDataset)).isFalse();
+		assertThat(fileFilter.shouldIngest(tempDir, evalReadme)).isFalse();
+	}
+
+	@Test
+	@DisplayName("Accepts nested src/eval/ files since prefix is matched from repo root only")
+	void testAcceptsNestedEvalFile() throws IOException {
+		Path nestedFile = tempDir.resolve("src/eval/Foo.java");
+		Files.createDirectories(nestedFile.getParent());
+		Files.writeString(nestedFile, "package src.eval; public class Foo {}");
+
+		assertThat(fileFilter.shouldIngest(tempDir, nestedFile)).isTrue();
+	}
+
+	@Test
+	@DisplayName("Rejects root eval files specified with Windows-style backslashes")
+	void testRejectsWindowsStyleBackslashEvalPath() throws IOException {
+		Path evalDir = tempDir.resolve("eval").resolve("cases");
+		Files.createDirectories(evalDir);
+		Path file = evalDir.resolve("test.jsonl");
+		Files.writeString(file, "{}");
+
+		// Pass file with backslashes
+		Path backslashPath = Path.of(tempDir.toString() + "\\eval\\cases\\test.jsonl");
+		assertThat(fileFilter.shouldIngest(tempDir, backslashPath)).isFalse();
+	}
+
+	@Test
+	@DisplayName("Rejects files matching custom path prefix configured via properties")
+	void testRejectsCustomPrefixViaProperties() throws IOException {
+		GitContextProperties customProperties = new GitContextProperties(
+				null,
+				tempDir,
+				"http://localhost:6333",
+				null,
+				new GitContextProperties.IngestionProperties(
+						512, 500, 4000,
+						null,
+						java.util.List.of("benchmark/", "./fixtures/"),
+						null, null, null, null
+				),
+				null
+		);
+		FileFilter customFilter = new FileFilter(customProperties);
+
+		Path benchmarkFile = tempDir.resolve("benchmark/cases.json");
+		Files.createDirectories(benchmarkFile.getParent());
+		Files.writeString(benchmarkFile, "{}");
+
+		Path fixtureFile = tempDir.resolve("fixtures/data.json");
+		Files.createDirectories(fixtureFile.getParent());
+		Files.writeString(fixtureFile, "{}");
+
+		Path srcFile = tempDir.resolve("src/benchmark/Case.java");
+		Files.createDirectories(srcFile.getParent());
+		Files.writeString(srcFile, "public class Case {}");
+
+		assertThat(customFilter.shouldIngest(tempDir, benchmarkFile)).isFalse();
+		assertThat(customFilter.shouldIngest(tempDir, fixtureFile)).isFalse();
+		assertThat(customFilter.shouldIngest(tempDir, srcFile)).isTrue();
+	}
+
+	@Test
+	@DisplayName("Empty prefix list excludes nothing extra from root")
+	void testEmptyPrefixListExcludesNothingExtra() throws IOException {
+		GitContextProperties emptyPrefixProps = new GitContextProperties(
+				null,
+				tempDir,
+				"http://localhost:6333",
+				null,
+				new GitContextProperties.IngestionProperties(
+						512, 500, 4000,
+						null,
+						java.util.List.of(),
+						null, null, null, null
+				),
+				null
+		);
+		FileFilter emptyPrefixFilter = new FileFilter(emptyPrefixProps);
+
+		Path evalJava = tempDir.resolve("eval/Test.java");
+		Files.createDirectories(evalJava.getParent());
+		Files.writeString(evalJava, "public class Test {}");
+
+		assertThat(emptyPrefixFilter.shouldIngest(tempDir, evalJava)).isTrue();
 	}
 }
