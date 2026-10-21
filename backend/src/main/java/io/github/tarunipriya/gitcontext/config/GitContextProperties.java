@@ -636,14 +636,14 @@ public record GitContextProperties(
 	/**
 	 * Configuration properties for running retrieval evaluations under {@code gitcontext.eval}.
 	 *
-	 * @param dataset path to the evaluation dataset .jsonl file (default: "../eval/datasets/gitcontext.jsonl")
+	 * @param dataset path to the evaluation dataset .jsonl file (default: "eval/datasets/gitcontext.jsonl")
 	 * @param repo target repository reference string (default: "tarunipriya/gitcontext")
 	 * @param ks list of cutoff rank positions k (default: [1, 3, 5, 10])
 	 * @param variants search variant names to evaluate (default: ["VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK"])
 	 * @param excludeTests whether to exclude test files during retrieval (default: false)
 	 * @param reingest whether to reingest repository before evaluation (default: true)
 	 * @param warmupQueries number of unrecorded warmup searches per variant (default: 1)
-	 * @param outputDir directory path where evaluation reports are saved (default: "../eval/results")
+	 * @param outputDir directory path where evaluation reports are saved (default: "eval/results")
 	 */
 	public record EvalProperties(
 			@NotBlank @DefaultValue("eval/datasets/gitcontext.jsonl") String dataset,

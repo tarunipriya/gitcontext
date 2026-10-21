@@ -81,6 +81,21 @@ class EvalDatasetLoaderTest {
 		}
 
 		@Test
+		@DisplayName("Normalizes Git history source keys in expectedPaths")
+		void validSourceKeysInExpectedPaths() throws IOException {
+			Path file = tempDir.resolve("history-keys.jsonl");
+			String content = """
+					{"id": "h-01", "question": "Which PR?", "expectedPaths": ["PR:16", "commit:4F7B2C9D0123456789ABCDEF0123456789ABCDEF", "issue:3"], "answerable": true}
+					""";
+			Files.writeString(file, content);
+
+			EvalDataset dataset = EvalDatasetLoader.load(file);
+			assertThat(dataset.cases()).hasSize(1);
+			EvalCase evalCase = dataset.cases().get(0);
+			assertThat(evalCase.expectedPaths()).containsExactly("pr:16", "commit:4f7b2c9", "issue:3");
+		}
+
+		@Test
 		@DisplayName("A line without answerable field and with expectedPaths loads as answerable=true")
 		void lineWithoutAnswerableDefaultsToTrue() throws IOException {
 			Path file = tempDir.resolve("default-answerable.jsonl");
@@ -261,6 +276,25 @@ class EvalDatasetLoaderTest {
 					.isInstanceOf(EvalDatasetException.class)
 					.hasMessageContaining("line 1")
 					.hasMessageContaining("Invalid JSON in unknown-field.jsonl");
+		}
+
+		@Test
+		@DisplayName("Invalid source key in expectedPaths throws EvalDatasetException with line number")
+		void rejectsInvalidSourceKeyWithLineNumber() throws IOException {
+			Path file = tempDir.resolve("bad-key.jsonl");
+			String content = """
+					// Line 1: Comment
+					{"id": "ok-01", "question": "Q1", "expectedPaths": ["src/A.java"], "answerable": true}
+					// Line 3: Comment
+					{"id": "bad-02", "question": "Q2", "expectedPaths": ["pr:abc"], "answerable": true}
+					""";
+			Files.writeString(file, content);
+
+			assertThatThrownBy(() -> EvalDatasetLoader.load(file))
+					.isInstanceOf(EvalDatasetException.class)
+					.hasMessageContaining("line 4")
+					.hasMessageContaining("bad-key.jsonl")
+					.hasMessageContaining("Invalid PR source key");
 		}
 	}
 }

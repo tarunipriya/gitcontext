@@ -64,6 +64,14 @@ class RetrievalMetricsTest {
 		}
 
 		@Test
+		@DisplayName("Leaves Git history source keys unchanged")
+		void leavesSourceKeysUnchanged() {
+			assertThat(RetrievalMetrics.normalizePath("pr:16")).isEqualTo("pr:16");
+			assertThat(RetrievalMetrics.normalizePath("issue:3")).isEqualTo("issue:3");
+			assertThat(RetrievalMetrics.normalizePath("commit:abc1234")).isEqualTo("commit:abc1234");
+		}
+
+		@Test
 		@DisplayName("Rejects null path with NullPointerException")
 		void rejectsNullPath() {
 			assertThatNullPointerException()

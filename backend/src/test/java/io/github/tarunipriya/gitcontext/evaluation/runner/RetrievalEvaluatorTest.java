@@ -334,4 +334,80 @@ class RetrievalEvaluatorTest {
 		CaseResult cr = vr.cases().get(0);
 		assertThat(cr.warnings()).anyMatch(w -> w.contains("Reranker was requested"));
 	}
+
+	@Test
+	@DisplayName("Git history source key matches search hit URL (expected pr:7 matches pull/7 hit)")
+	void testHistorySourceKeyMatchesSearchHit() {
+		EvalCase prCase = new EvalCase("case-pr", "Which PR fixed bug 7?", List.of("pr:7"), List.of(), "history", true);
+		EvalDataset dataset = new EvalDataset("history-ds", List.of(prCase));
+
+		SearchHit prHit = new SearchHit(
+				"hit-pr-7",
+				0.90,
+				"tarunipriya/gitcontext",
+				"run-1",
+				"chunk-pr-7",
+				"doc-pr-7",
+				0,
+				SourceType.PULL_REQUEST,
+				ChunkType.PULL_REQUEST,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				100,
+				"https://github.com/tarunipriya/gitcontext/pull/7",
+				null,
+				"PR 7 description",
+				"PR 7 content"
+		);
+		HybridSearchHit hybridHit = new HybridSearchHit(
+				prHit,
+				0.9,
+				null,
+				null,
+				null,
+				null,
+				null,
+				1
+		);
+		HybridSearchResult result = new HybridSearchResult(
+				List.of(hybridHit),
+				SearchMode.VECTOR,
+				false,
+				List.of(),
+				10L,
+				0L,
+				0L,
+				0L,
+				10L
+		);
+
+		when(searchService.search(eq(repo), eq("Which PR fixed bug 7?"), eq(1), any(), any(), eq(SearchMode.VECTOR), eq(false), eq(false)))
+				.thenReturn(result);
+
+		RetrievalEvaluator evaluator = new RetrievalEvaluator(searchService);
+		EvalReport report = evaluator.evaluate(
+				dataset,
+				repo,
+				List.of("pr:7"),
+				"head-sha",
+				List.of(EvalVariant.VECTOR),
+				List.of(1),
+				false,
+				0
+		);
+
+		VariantReport vr = report.variants().get(0);
+		CaseResult cr = vr.cases().get(0);
+		assertThat(cr.retrievedPaths()).containsExactly("pr:7");
+		assertThat(cr.expectedPaths()).containsExactly("pr:7");
+		assertThat(cr.metricsByK().get(1).hitRateAtK()).isEqualTo(1.0);
+		assertThat(cr.metricsByK().get(1).recallAtK()).isEqualTo(1.0);
+		assertThat(report.missingExpectedPaths()).isEmpty();
+		assertThat(cr.warnings()).isEmpty();
+	}
 }

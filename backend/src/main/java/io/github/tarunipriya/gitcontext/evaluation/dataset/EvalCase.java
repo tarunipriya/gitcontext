@@ -2,7 +2,7 @@ package io.github.tarunipriya.gitcontext.evaluation.dataset;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import io.github.tarunipriya.gitcontext.evaluation.RetrievalMetrics;
+import io.github.tarunipriya.gitcontext.evaluation.SourceKeys;
 import java.util.List;
 import java.util.Objects;
 
@@ -31,7 +31,7 @@ public record EvalCase(
 		expectedPaths = expectedPaths != null
 				? expectedPaths.stream()
 						.filter(Objects::nonNull)
-						.map(RetrievalMetrics::normalizePath)
+						.map(SourceKeys::normalizeExpected)
 						.toList()
 				: List.of();
 		expectedFacts = expectedFacts != null

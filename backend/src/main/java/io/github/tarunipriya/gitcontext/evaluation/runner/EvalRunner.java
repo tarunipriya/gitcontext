@@ -1,6 +1,7 @@
 package io.github.tarunipriya.gitcontext.evaluation.runner;
 
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
+import io.github.tarunipriya.gitcontext.evaluation.SourceKeys;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalDataset;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalDatasetLoader;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
@@ -89,7 +90,7 @@ public class EvalRunner implements CommandLineRunner {
 			log.info("Ingestion completed: indexedCommitSha={}, {} documents, {} chunks",
 					indexedCommitSha, ingestionResult.documents().size(), ingestionResult.chunks().size());
 			indexedPaths = ingestionResult.documents().stream()
-					.map(doc -> doc.metadata().path())
+					.map(doc -> SourceKeys.of(doc.metadata()))
 					.filter(Objects::nonNull)
 					.collect(Collectors.toSet());
 		} else {

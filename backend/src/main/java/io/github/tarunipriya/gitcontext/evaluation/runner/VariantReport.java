@@ -2,6 +2,8 @@ package io.github.tarunipriya.gitcontext.evaluation.runner;
 
 import io.github.tarunipriya.gitcontext.evaluation.LatencyStats;
 import io.github.tarunipriya.gitcontext.evaluation.MetricSummary;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,7 +27,7 @@ public record VariantReport(
 
 	public VariantReport {
 		Objects.requireNonNull(variant, "variant must not be null");
-		summaryByK = (summaryByK != null) ? Map.copyOf(summaryByK) : Map.of();
+		summaryByK = (summaryByK != null) ? Collections.unmodifiableMap(new LinkedHashMap<>(summaryByK)) : Map.of();
 		Objects.requireNonNull(latency, "latency must not be null");
 		cases = (cases != null) ? List.copyOf(cases) : List.of();
 	}

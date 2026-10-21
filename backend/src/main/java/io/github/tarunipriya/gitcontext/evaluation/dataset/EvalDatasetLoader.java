@@ -76,10 +76,12 @@ public final class EvalDatasetLoader {
 				EvalCase evalCase;
 				try {
 					evalCase = JSON_MAPPER.readValue(line, EvalCase.class);
-				} catch (JacksonException e) {
-					throw new EvalDatasetException(
-							"Invalid JSON in " + fileName + " at line " + lineNumber + ": " + e.getMessage(), e);
 				} catch (Exception e) {
+					IllegalArgumentException iae = findIllegalArgumentException(e);
+					if (iae != null) {
+						throw new EvalDatasetException(
+								"Invalid source key in " + fileName + " at line " + lineNumber + ": " + iae.getMessage(), iae);
+					}
 					throw new EvalDatasetException(
 							"Invalid JSON in " + fileName + " at line " + lineNumber + ": " + e.getMessage(), e);
 				}
@@ -114,5 +116,16 @@ public final class EvalDatasetLoader {
 		}
 
 		return new EvalDataset(datasetName, cases);
+	}
+
+	private static IllegalArgumentException findIllegalArgumentException(Throwable t) {
+		Throwable current = t;
+		while (current != null) {
+			if (current instanceof IllegalArgumentException iae) {
+				return iae;
+			}
+			current = current.getCause();
+		}
+		return null;
 	}
 }

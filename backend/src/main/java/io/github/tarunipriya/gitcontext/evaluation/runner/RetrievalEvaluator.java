@@ -4,6 +4,7 @@ import io.github.tarunipriya.gitcontext.evaluation.LatencyStats;
 import io.github.tarunipriya.gitcontext.evaluation.MetricSummary;
 import io.github.tarunipriya.gitcontext.evaluation.QueryMetrics;
 import io.github.tarunipriya.gitcontext.evaluation.RetrievalMetrics;
+import io.github.tarunipriya.gitcontext.evaluation.SourceKeys;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalCase;
 import io.github.tarunipriya.gitcontext.evaluation.dataset.EvalDataset;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
@@ -97,13 +98,13 @@ public class RetrievalEvaluator {
 		if (indexedPaths != null) {
 			normalizedIndexed = indexedPaths.stream()
 					.filter(Objects::nonNull)
-					.map(RetrievalMetrics::normalizePath)
+					.map(SourceKeys::normalizeExpected)
 					.collect(Collectors.toSet());
 
 			Set<String> missingSet = new LinkedHashSet<>();
 			for (EvalCase evalCase : answerableCases) {
 				for (String expected : evalCase.expectedPaths()) {
-					String normalized = RetrievalMetrics.normalizePath(expected);
+					String normalized = SourceKeys.normalizeExpected(expected);
 					if (!normalizedIndexed.contains(normalized)) {
 						missingSet.add(normalized);
 					}
@@ -152,7 +153,7 @@ public class RetrievalEvaluator {
 				// Check if all expected paths for this case are missing
 				if (normalizedIndexed != null && !evalCase.expectedPaths().isEmpty()) {
 					boolean allMissing = evalCase.expectedPaths().stream()
-							.map(RetrievalMetrics::normalizePath)
+							.map(SourceKeys::normalizeExpected)
 							.noneMatch(normalizedIndexed::contains);
 					if (allMissing) {
 						caseWarnings.add("All expected paths are missing from indexed documents: " + evalCase.expectedPaths());
@@ -185,7 +186,7 @@ public class RetrievalEvaluator {
 					}
 
 					List<String> retrievedPaths = result.hits().stream()
-							.map(h -> h.hit().path())
+							.map(h -> SourceKeys.of(h.hit()))
 							.filter(Objects::nonNull)
 							.toList();
 

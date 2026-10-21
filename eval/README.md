@@ -33,15 +33,35 @@ Datasets are stored in JSON Lines (`.jsonl`) files inside `eval/datasets/`. Each
 |---|---|---|---|
 | `id` | `String` | Yes | Unique identifier for the case within the dataset (e.g. `"ingest-001"`). Non-blank. |
 | `question` | `String` | Yes | The natural language question a developer would ask. Non-blank. |
-| `expectedPaths` | `List<String>` | Yes | Repository-relative canonical file paths required to answer the question. Normalized automatically. Must be non-empty if `answerable=true`; must be empty if `answerable=false`. |
+| `expectedPaths` | `List<String>` | Yes | Repository-relative canonical file paths or Git history source keys required to answer the question. Normalized automatically. Must be non-empty if `answerable=true`; must be empty if `answerable=false`. |
 | `expectedFacts` | `List<String>` | Yes | Concise, atomic facts that must be present in the generated answer for correctness scoring. |
 | `category` | `String` | No | Architectural or thematic domain (e.g. `"architecture"`, `"ingestion"`, `"chunking"`, `"retrieval"`). Defaults to `"general"` if omitted or blank. |
 | `answerable` | `Boolean` | No | `true` if the question can be answered from the repository; `false` for negative/unanswerable test cases. Defaults to `true` if omitted. |
 
-### Example: Answerable Case
+### Source Keys for Git History
+
+In addition to source file paths, `expectedPaths` supports Git history entities via canonical source keys:
+
+- **Pull Requests**: `"pr:<number>"` (e.g. `"pr:16"`, case-insensitive `"PR:16"`).
+- **Issues**: `"issue:<number>"` (e.g. `"issue:3"`).
+- **Commits**: `"commit:<sha>"` (e.g. `"commit:abc1234"`). Either full (40-hex) or short (minimum 7-hex) commit SHAs are allowed and are automatically normalized to `"commit:"` plus the first 7 lowercase hex characters.
+
+### Example: Code File Question
 
 ```json
 {"id": "chunk-ast-001", "question": "Which tree-sitter grammars are supported for AST chunking?", "expectedPaths": ["backend/src/main/java/io/github/tarunipriya/gitcontext/chunking/treesitter/CodeChunker.java", "backend/pom.xml"], "expectedFacts": ["Java, Python, JavaScript, TypeScript, and TSX grammars are supported", "Grammar artifacts are bundled via io.github.bonede tree-sitter dependencies"], "category": "chunking", "answerable": true}
+```
+
+### Example: Git History Question (Pull Request)
+
+```json
+{"id": "history-pr-001", "question": "Which pull request introduced support for AST-aware code chunking?", "expectedPaths": ["pr:16"], "expectedFacts": ["PR 16 added tree-sitter chunking support", "Introduced CodeChunker and grammars"], "category": "history", "answerable": true}
+```
+
+### Example: Commit Question (Full or Short SHA)
+
+```json
+{"id": "history-commit-001", "question": "Which commit added the initial Lucene BM25 index?", "expectedPaths": ["commit:4f7b2c9d0123456789abcdef0123456789abcdef"], "expectedFacts": ["Commit 4f7b2c9 created the KeywordIndex using Apache Lucene"], "category": "history", "answerable": true}
 ```
 
 ### Example: Unanswerable Case (`answerable=false`)
