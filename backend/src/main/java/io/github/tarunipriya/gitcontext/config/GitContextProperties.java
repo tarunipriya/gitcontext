@@ -59,7 +59,8 @@ public record GitContextProperties(
 		@Valid @DefaultValue HybridProperties hybrid,
 		@Valid @DefaultValue RerankProperties rerank,
 		@Valid @DefaultValue LlmProperties llm,
-		@Valid @DefaultValue DemoProperties demo
+		@Valid @DefaultValue DemoProperties demo,
+		@Valid @DefaultValue EvalProperties eval
 ) {
 
 	/**
@@ -149,10 +150,54 @@ public record GitContextProperties(
 			String r = (demo.repo() != null && !demo.repo().isBlank()) ? demo.repo() : "tarunipriya/gitcontext";
 			demo = new DemoProperties(r, demo.forceReingest());
 		}
+		if (eval == null) {
+			eval = new EvalProperties(
+					"eval/datasets/gitcontext.jsonl",
+					"tarunipriya/gitcontext",
+					List.of(1, 3, 5, 10),
+					List.of("VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK"),
+					false,
+					true,
+					1,
+					"eval/results"
+			);
+		} else {
+			String d = (eval.dataset() != null && !eval.dataset().isBlank()) ? eval.dataset() : "eval/datasets/gitcontext.jsonl";
+			String r = (eval.repo() != null && !eval.repo().isBlank()) ? eval.repo() : "tarunipriya/gitcontext";
+			List<Integer> ks = (eval.ks() != null && !eval.ks().isEmpty()) ? eval.ks() : List.of(1, 3, 5, 10);
+			List<String> vars = (eval.variants() != null && !eval.variants().isEmpty()) ? List.copyOf(eval.variants()) : List.of("VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK");
+			boolean ext = eval.excludeTests();
+			boolean rei = eval.reingest();
+			int w = eval.warmupQueries() >= 0 ? eval.warmupQueries() : 1;
+			String out = (eval.outputDir() != null && !eval.outputDir().isBlank()) ? eval.outputDir() : "eval/results";
+			eval = new EvalProperties(d, r, ks, vars, ext, rei, w, out);
+		}
 	}
 
 	/**
-	 * Overloaded constructor preserving compatibility for callers with all properties except demo.
+	 * Overloaded constructor preserving compatibility for callers with all properties except eval.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid,
+			RerankProperties rerank,
+			LlmProperties llm,
+			DemoProperties demo
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, demo, null);
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all properties except demo and eval.
 	 */
 	public GitContextProperties(
 			String githubToken,
@@ -169,7 +214,7 @@ public record GitContextProperties(
 			RerankProperties rerank,
 			LlmProperties llm
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, null, null);
 	}
 
 	/**
@@ -589,6 +634,71 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for running retrieval evaluations under {@code gitcontext.eval}.
+	 *
+	 * @param dataset path to the evaluation dataset .jsonl file (default: "../eval/datasets/gitcontext.jsonl")
+	 * @param repo target repository reference string (default: "tarunipriya/gitcontext")
+	 * @param ks list of cutoff rank positions k (default: [1, 3, 5, 10])
+	 * @param variants search variant names to evaluate (default: ["VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK"])
+	 * @param excludeTests whether to exclude test files during retrieval (default: false)
+	 * @param reingest whether to reingest repository before evaluation (default: true)
+	 * @param warmupQueries number of unrecorded warmup searches per variant (default: 1)
+	 * @param outputDir directory path where evaluation reports are saved (default: "../eval/results")
+	 */
+	public record EvalProperties(
+			@NotBlank @DefaultValue("eval/datasets/gitcontext.jsonl") String dataset,
+			@NotBlank @DefaultValue("tarunipriya/gitcontext") String repo,
+			@DefaultValue({"1", "3", "5", "10"}) List<Integer> ks,
+			@DefaultValue({"VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK"}) List<String> variants,
+			@DefaultValue("false") boolean excludeTests,
+			@DefaultValue("true") boolean reingest,
+			@Min(0) @DefaultValue("1") int warmupQueries,
+			@NotBlank @DefaultValue("eval/results") String outputDir
+	) {
+		public EvalProperties {
+			if (dataset == null || dataset.isBlank()) {
+				dataset = "eval/datasets/gitcontext.jsonl";
+			}
+			if (repo == null || repo.isBlank()) {
+				repo = "tarunipriya/gitcontext";
+			}
+			if (ks == null) {
+				ks = List.of(1, 3, 5, 10);
+			} else {
+				if (ks.isEmpty()) {
+					throw new IllegalArgumentException("Cutoff ranks ks must not be empty");
+				}
+				for (Integer k : ks) {
+					if (k == null || k <= 0) {
+						throw new IllegalArgumentException("Cutoff rank k must be greater than 0, got: " + k);
+					}
+				}
+				ks = ks.stream().distinct().toList();
+			}
+			if (variants == null || variants.isEmpty()) {
+				variants = List.of("VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK");
+			} else {
+				variants = List.copyOf(variants);
+			}
+			if (warmupQueries < 0) {
+				warmupQueries = 1;
+			}
+			if (outputDir == null || outputDir.isBlank()) {
+				outputDir = "eval/results";
+			}
+		}
+
+		/**
+		 * Returns the maximum cutoff rank k in {@code ks}.
+		 *
+		 * @return maximum rank cutoff
+		 */
+		public int maxK() {
+			return ks.stream().mapToInt(Integer::intValue).max().orElse(10);
+		}
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -622,7 +732,8 @@ public record GitContextProperties(
 				"hybrid=" + hybrid + ", " +
 				"rerank=" + rerank + ", " +
 				"llm=" + llm + ", " +
-				"demo=" + demo +
+				"demo=" + demo + ", " +
+				"eval=" + eval +
 				"]";
 	}
 

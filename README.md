@@ -71,4 +71,33 @@ $response.answer
 $response.citations | Format-Table number, path, startLine, endLine, url
 ```
 
+## Evaluation
+
+GitContext includes an automated retrieval evaluation benchmark runner comparing `VECTOR`, `KEYWORD`, `HYBRID` (RRF), and `HYBRID_RERANK` search strategies on JSONL benchmark datasets.
+
+### Running Retrieval Evaluation (Windows)
+
+From the `backend/` directory, launch the evaluation profile:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=eval"
+```
+
+### Overriding Parameters
+
+You can override dataset, repository, cutoff ranks, variants, or output directory via `-Dspring-boot.run.arguments`:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=eval" "-Dspring-boot.run.arguments=--gitcontext.eval.dataset=eval/datasets/smoke.jsonl --gitcontext.eval.repo=tarunipriya/gitcontext --gitcontext.eval.variants=VECTOR,KEYWORD,HYBRID --gitcontext.eval.ks=1,5,10"
+```
+
+### Evaluation Results
+
+Evaluation reports are written to `eval/results/` in both formatted Markdown (`.md`) and structured JSON (`.json`) containing:
+- Multi-cutoff metrics tables (`Hit@k`, `Recall@k`, `Precision@k`, `MRR`, `nDCG@k`)
+- Latency percentile distributions (`p50`, `p95`, `p99`, `mean`)
+- Missing ground-truth file path analysis
+- Hit misses analysis with top retrieved passages
+
+
 

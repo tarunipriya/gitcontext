@@ -1,0 +1,26 @@
+spring:
+  main:
+    web-application-type: none
+
+gitcontext:
+  eval:
+    dataset: eval/datasets/gitcontext.jsonl
+    repo: tarunipriya/gitcontext
+    ks: [1, 3, 5, 10]
+    variants: [VECTOR, KEYWORD, HYBRID, HYBRID_RERANK]
+    exclude-tests: false
+    reingest: true
+    warmup-queries: 1
+    output-dir: eval/results
+
+# Example overrides:
+# gitcontext:
+#   eval:
+#     dataset: eval/datasets/smoke.jsonl
+#     repo: tarunipriya/gitcontext
+#     ks: [1, 5]
+#     variants: [HYBRID, HYBRID_RERANK]
+#     exclude-tests: true
+#     reingest: false
+#     warmup-queries: 0
+#     output-dir: eval/results
