@@ -20,6 +20,8 @@ gitcontext:
 #     repo: tarunipriya/gitcontext
 #     ks: [1, 5]
 #     variants: [HYBRID, HYBRID_RERANK]
+#     # Sweep keyword weight across hybrid variants:
+#     # variants: [VECTOR, KEYWORD, HYBRID, "HYBRID:kw=0.75", "HYBRID:kw=0.5", "HYBRID:kw=0.25", HYBRID_RERANK, "HYBRID_RERANK:kw=0.5"]
 #     exclude-tests: true
 #     reingest: false
 #     warmup-queries: 0

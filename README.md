@@ -91,6 +91,16 @@ You can override dataset, repository, cutoff ranks, variants, or output director
 .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=eval" "-Dspring-boot.run.arguments=--gitcontext.eval.dataset=eval/datasets/smoke.jsonl --gitcontext.eval.repo=tarunipriya/gitcontext --gitcontext.eval.variants=VECTOR,KEYWORD,HYBRID --gitcontext.eval.ks=1,5,10"
 ```
 
+### Sweeping Keyword Weights in Evaluation
+
+For `HYBRID` and `HYBRID_RERANK` variants, you can append an optional `:kw=<number>` suffix to sweep the keyword reciprocal rank fusion weight (e.g. `HYBRID:kw=0.5`). When omitted, the default weight from `gitcontext.hybrid.keyword-weight` (1.0) is used.
+
+To run an evaluation sweep across multiple keyword weights on Windows (PowerShell):
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=eval" "-Dspring-boot.run.arguments=--gitcontext.eval.variants=VECTOR,KEYWORD,HYBRID,HYBRID:kw=0.75,HYBRID:kw=0.5,HYBRID:kw=0.25,HYBRID_RERANK,HYBRID_RERANK:kw=0.5"
+```
+
 ### Evaluation Results
 
 Evaluation reports are written to `eval/results/` in both formatted Markdown (`.md`) and structured JSON (`.json`) containing:

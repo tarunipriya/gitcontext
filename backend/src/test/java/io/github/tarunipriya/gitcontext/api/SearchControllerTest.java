@@ -57,7 +57,9 @@ class SearchControllerTest {
 		GitContextProperties.HybridProperties hybridConfig = new GitContextProperties.HybridProperties(
 				50,
 				60,
-				SearchMode.HYBRID
+				SearchMode.HYBRID,
+				1.0,
+				1.0
 		);
 		GitContextProperties.RerankProperties rerankConfig = new GitContextProperties.RerankProperties(
 				false,

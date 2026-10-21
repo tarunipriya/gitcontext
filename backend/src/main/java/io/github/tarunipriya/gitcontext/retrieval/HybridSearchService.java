@@ -53,6 +53,48 @@ public class HybridSearchService {
 	}
 
 	/**
+	 * Searches chunks belonging to the specified repository with rerank, test exclusion, and custom fusion weights.
+	 *
+	 * @param repo repository reference
+	 * @param query search query or question
+	 * @param k maximum number of hits to return
+	 * @param types optional filter for structural chunk types
+	 * @param pathPrefix optional file path prefix filter
+	 * @param mode search strategy (VECTOR, KEYWORD, or HYBRID; defaults from config if null)
+	 * @param rerank whether cross-encoder reranking is requested
+	 * @param excludeTests whether test-related files should be filtered out
+	 * @param weights custom reciprocal rank fusion weights (null to use configuration properties)
+	 * @return aggregated search outcome with hits, active mode, warnings, and latency breakdown
+	 */
+	public HybridSearchResult search(
+			RepoRef repo,
+			String query,
+			int k,
+			Set<ChunkType> types,
+			String pathPrefix,
+			SearchMode mode,
+			boolean rerank,
+			boolean excludeTests,
+			FusionWeights weights
+	) {
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(query, "query must not be null");
+
+		SearchMode effectiveMode = (mode != null) ? mode : properties.hybrid().defaultMode();
+		if (k <= 0) {
+			return new HybridSearchResult(List.of(), effectiveMode, false, List.of(), 0L, 0L, 0L, 0L, 0L);
+		}
+
+		long totalStart = System.currentTimeMillis();
+
+		return switch (effectiveMode) {
+			case VECTOR -> executeVectorSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
+			case KEYWORD -> executeKeywordSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
+			case HYBRID -> executeHybridSearch(repo, query, k, types, pathPrefix, rerank, excludeTests, weights, totalStart);
+		};
+	}
+
+	/**
 	 * Searches chunks belonging to the specified repository with rerank and test exclusion flags.
 	 *
 	 * @param repo repository reference
@@ -75,21 +117,7 @@ public class HybridSearchService {
 			boolean rerank,
 			boolean excludeTests
 	) {
-		Objects.requireNonNull(repo, "repo must not be null");
-		Objects.requireNonNull(query, "query must not be null");
-
-		SearchMode effectiveMode = (mode != null) ? mode : properties.hybrid().defaultMode();
-		if (k <= 0) {
-			return new HybridSearchResult(List.of(), effectiveMode, false, List.of(), 0L, 0L, 0L, 0L, 0L);
-		}
-
-		long totalStart = System.currentTimeMillis();
-
-		return switch (effectiveMode) {
-			case VECTOR -> executeVectorSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
-			case KEYWORD -> executeKeywordSearch(repo, query, k, types, pathPrefix, excludeTests, totalStart);
-			case HYBRID -> executeHybridSearch(repo, query, k, types, pathPrefix, rerank, excludeTests, totalStart);
-		};
+		return search(repo, query, k, types, pathPrefix, mode, rerank, excludeTests, null);
 	}
 
 	/**
@@ -111,7 +139,7 @@ public class HybridSearchService {
 			String pathPrefix,
 			SearchMode mode
 	) {
-		return search(repo, query, k, types, pathPrefix, mode, false, false);
+		return search(repo, query, k, types, pathPrefix, mode, false, false, null);
 	}
 
 	private HybridSearchResult executeVectorSearch(
@@ -196,10 +224,12 @@ public class HybridSearchService {
 			String pathPrefix,
 			boolean rerank,
 			boolean excludeTests,
+			FusionWeights weights,
 			long totalStart
 	) {
 		int candidates = properties.hybrid().candidates();
 		int rrfK = properties.hybrid().rrfK();
+		FusionWeights effectiveWeights = (weights != null) ? weights : FusionWeights.defaults(properties);
 		List<String> warnings = new ArrayList<>();
 
 		// 1. Vector Candidate Retrieval
@@ -259,7 +289,14 @@ public class HybridSearchService {
 		// 3. Reciprocal Rank Fusion
 		long fusionStart = System.currentTimeMillis();
 		int totalCandidates = vectorHits.size() + keywordHits.size();
-		List<HybridSearchHit> fusedHits = ReciprocalRankFusion.fuse(vectorHits, keywordHits, Math.max(1, totalCandidates), rrfK);
+		List<HybridSearchHit> fusedHits = ReciprocalRankFusion.fuse(
+				vectorHits,
+				keywordHits,
+				Math.max(1, totalCandidates),
+				rrfK,
+				effectiveWeights.vectorWeight(),
+				effectiveWeights.keywordWeight()
+		);
 		long fusionMillis = System.currentTimeMillis() - fusionStart;
 
 		// 4. Test file filtering applied before taking top candidates / top k

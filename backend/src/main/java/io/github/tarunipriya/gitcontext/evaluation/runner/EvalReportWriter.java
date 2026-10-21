@@ -127,7 +127,7 @@ public class EvalReportWriter {
 					sb.append(String.format(
 							Locale.ROOT,
 							"| %s | %.3f | %.3f | %.3f | %.3f | %.3f |\n",
-							vr.variant(),
+							vr.variant().label(),
 							summary.meanHitRateAtK(),
 							summary.meanRecallAtK(),
 							summary.meanPrecisionAtK(),
@@ -135,7 +135,7 @@ public class EvalReportWriter {
 							summary.meanNdcgAtK()
 					));
 				} else {
-					sb.append(String.format(Locale.ROOT, "| %s | - | - | - | - | - |\n", vr.variant()));
+					sb.append(String.format(Locale.ROOT, "| %s | - | - | - | - | - |\n", vr.variant().label()));
 				}
 			}
 			sb.append("\n");
@@ -150,14 +150,14 @@ public class EvalReportWriter {
 				sb.append(String.format(
 						Locale.ROOT,
 						"| %s | n/a | n/a | n/a | n/a | %d |\n",
-						vr.variant(),
+						vr.variant().label(),
 						vr.failedCases()
 				));
 			} else {
 				sb.append(String.format(
 						Locale.ROOT,
 						"| %s | %d | %d | %d | %.1f | %d |\n",
-						vr.variant(),
+						vr.variant().label(),
 						vr.latency().p50Ms(),
 						vr.latency().p95Ms(),
 						vr.latency().p99Ms(),
@@ -192,7 +192,7 @@ public class EvalReportWriter {
 
 		sb.append("## Misses at k=").append(missK).append("\n\n");
 		for (VariantReport vr : report.variants()) {
-			sb.append("### ").append(vr.variant()).append("\n\n");
+			sb.append("### ").append(vr.variant().label()).append("\n\n");
 			List<CaseResult> misses = vr.cases().stream()
 					.filter(c -> {
 						MetricSummary ms = vr.summaryByK().get(missK);

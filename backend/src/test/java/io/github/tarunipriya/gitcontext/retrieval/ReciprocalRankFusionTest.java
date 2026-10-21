@@ -118,4 +118,151 @@ class ReciprocalRankFusionTest {
 		assertThat(fused.get(0).fusedScore()).isGreaterThan(fused.get(1).fusedScore());
 		assertThat(fused.get(0).fusedScore()).isGreaterThan(fused.get(2).fusedScore());
 	}
+
+	@Test
+	@DisplayName("Weights 1.0 / 1.0 produce identical results to the unweighted overload")
+	void fuse_weightsOneOne_matchesUnweightedIdentically() {
+		SearchHit hitA = createHit("A", 0.95);
+		SearchHit hitB = createHit("B", 0.85);
+		SearchHit hitC = createHit("C", 0.75);
+		List<SearchHit> vectorHits = List.of(hitA, hitB, hitC);
+
+		SearchHit hitBKeyword = createHit("B", 15.0);
+		SearchHit hitD = createHit("D", 12.0);
+		SearchHit hitAKeyword = createHit("A", 10.0);
+		List<SearchHit> keywordHits = List.of(hitBKeyword, hitD, hitAKeyword);
+
+		List<HybridSearchHit> unweighted = ReciprocalRankFusion.fuse(vectorHits, keywordHits, 10, 60);
+		List<HybridSearchHit> weighted = ReciprocalRankFusion.fuse(vectorHits, keywordHits, 10, 60, 1.0, 1.0);
+
+		assertThat(weighted).hasSameSizeAs(unweighted);
+		for (int i = 0; i < unweighted.size(); i++) {
+			HybridSearchHit expected = unweighted.get(i);
+			HybridSearchHit actual = weighted.get(i);
+			assertThat(actual.hit().chunkId()).isEqualTo(expected.hit().chunkId());
+			assertThat(actual.fusedScore()).isEqualTo(expected.fusedScore());
+			assertThat(actual.vectorRank()).isEqualTo(expected.vectorRank());
+			assertThat(actual.keywordRank()).isEqualTo(expected.keywordRank());
+		}
+	}
+
+	@Test
+	@DisplayName("Keyword weight 0.5 exactly halves keyword reciprocal rank contributions")
+	void fuse_keywordWeightHalf_halvesKeywordContributions() {
+		// Vector: A (rank 1), B (rank 2)
+		SearchHit hitA = createHit("A", 0.90);
+		SearchHit hitB = createHit("B", 0.80);
+		List<SearchHit> vectorHits = List.of(hitA, hitB);
+
+		// Keyword: B (rank 1), A (rank 2)
+		SearchHit hitBKeyword = createHit("B", 20.0);
+		SearchHit hitAKeyword = createHit("A", 10.0);
+		List<SearchHit> keywordHits = List.of(hitBKeyword, hitAKeyword);
+
+		int rrfK = 60;
+		double vectorWeight = 1.0;
+		double keywordWeight = 0.5;
+
+		List<HybridSearchHit> fused = ReciprocalRankFusion.fuse(
+				vectorHits,
+				keywordHits,
+				10,
+				rrfK,
+				vectorWeight,
+				keywordWeight
+		);
+
+		assertThat(fused).hasSize(2);
+
+		// Chunk A: 1.0 / (60 + 1) + 0.5 / (60 + 2) = 1/61 + 0.5/62 ≈ 0.02445795874
+		double expectedA = (1.0 / 61.0) + (0.5 / 62.0);
+		assertThat(fused.get(0).hit().chunkId()).isEqualTo("A");
+		assertThat(fused.get(0).fusedScore()).isCloseTo(expectedA, Offset.offset(1e-9));
+		assertThat(fused.get(0).vectorRank()).isEqualTo(1);
+		assertThat(fused.get(0).keywordRank()).isEqualTo(2);
+
+		// Chunk B: 1.0 / (60 + 2) + 0.5 / (60 + 1) = 1/62 + 0.5/61 ≈ 0.02432575357
+		double expectedB = (1.0 / 62.0) + (0.5 / 61.0);
+		assertThat(fused.get(1).hit().chunkId()).isEqualTo("B");
+		assertThat(fused.get(1).fusedScore()).isCloseTo(expectedB, Offset.offset(1e-9));
+		assertThat(fused.get(1).vectorRank()).isEqualTo(2);
+		assertThat(fused.get(1).keywordRank()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("Keyword weight 0 causes fused order to follow vector ranks for items present in both")
+	void fuse_keywordWeightZero_orderFollowsVectorRanksForSharedItems() {
+		// Vector: A (rank 1), B (rank 2), C (rank 3)
+		SearchHit hitA = createHit("A", 0.90);
+		SearchHit hitB = createHit("B", 0.80);
+		SearchHit hitC = createHit("C", 0.70);
+		List<SearchHit> vectorHits = List.of(hitA, hitB, hitC);
+
+		// Keyword reverse order: C (rank 1), B (rank 2), A (rank 3), D (rank 4)
+		SearchHit hitCKey = createHit("C", 30.0);
+		SearchHit hitBKey = createHit("B", 20.0);
+		SearchHit hitAKey = createHit("A", 10.0);
+		SearchHit hitDKey = createHit("D", 5.0);
+		List<SearchHit> keywordHits = List.of(hitCKey, hitBKey, hitAKey, hitDKey);
+
+		List<HybridSearchHit> fused = ReciprocalRankFusion.fuse(
+				vectorHits,
+				keywordHits,
+				10,
+				60,
+				1.0,
+				0.0
+		);
+
+		assertThat(fused).hasSize(4);
+		// Order strictly follows vector rank: A (1/61), B (1/62), C (1/63)
+		assertThat(fused.get(0).hit().chunkId()).isEqualTo("A");
+		assertThat(fused.get(0).fusedScore()).isCloseTo(1.0 / 61.0, Offset.offset(1e-9));
+
+		assertThat(fused.get(1).hit().chunkId()).isEqualTo("B");
+		assertThat(fused.get(1).fusedScore()).isCloseTo(1.0 / 62.0, Offset.offset(1e-9));
+
+		assertThat(fused.get(2).hit().chunkId()).isEqualTo("C");
+		assertThat(fused.get(2).fusedScore()).isCloseTo(1.0 / 63.0, Offset.offset(1e-9));
+
+		// D is only in keyword, with keywordWeight=0 its score is 0.0
+		assertThat(fused.get(3).hit().chunkId()).isEqualTo("D");
+		assertThat(fused.get(3).fusedScore()).isEqualTo(0.0);
+		assertThat(fused.get(3).keywordRank()).isEqualTo(4);
+	}
+
+	@Test
+	@DisplayName("Validation fails when weights are negative, non-finite, or both zero")
+	void fuse_invalidWeights_throwsIllegalArgumentException() {
+		List<SearchHit> vectorHits = List.of(createHit("A", 0.9));
+		List<SearchHit> keywordHits = List.of(createHit("B", 10.0));
+
+		// Negative weights
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+				ReciprocalRankFusion.fuse(vectorHits, keywordHits, 5, 60, -0.1, 1.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight must be finite and >= 0");
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+				ReciprocalRankFusion.fuse(vectorHits, keywordHits, 5, 60, 1.0, -0.5))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("keywordWeight must be finite and >= 0");
+
+		// Non-finite weights
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+				ReciprocalRankFusion.fuse(vectorHits, keywordHits, 5, 60, Double.NaN, 1.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight must be finite and >= 0");
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+				ReciprocalRankFusion.fuse(vectorHits, keywordHits, 5, 60, 1.0, Double.POSITIVE_INFINITY))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("keywordWeight must be finite and >= 0");
+
+		// Both zero
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+				ReciprocalRankFusion.fuse(vectorHits, keywordHits, 5, 60, 0.0, 0.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight and keywordWeight cannot both be 0");
+	}
 }

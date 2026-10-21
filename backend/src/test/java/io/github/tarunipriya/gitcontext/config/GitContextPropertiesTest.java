@@ -97,6 +97,8 @@ class GitContextPropertiesTest {
 			assertThat(hybrid.candidates()).isEqualTo(50);
 			assertThat(hybrid.rrfK()).isEqualTo(60);
 			assertThat(hybrid.defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID);
+			assertThat(hybrid.vectorWeight()).isEqualTo(1.0);
+			assertThat(hybrid.keywordWeight()).isEqualTo(1.0);
 
 			// Rerank defaults
 			GitContextProperties.RerankProperties rerank = props.rerank();
@@ -176,6 +178,8 @@ class GitContextPropertiesTest {
 				"gitcontext.hybrid.candidates=30",
 				"gitcontext.hybrid.rrf-k=40",
 				"gitcontext.hybrid.default-mode=KEYWORD",
+				"gitcontext.hybrid.vector-weight=0.8",
+				"gitcontext.hybrid.keyword-weight=0.4",
 				"gitcontext.rerank.enabled=true",
 				"gitcontext.rerank.model-name=custom-reranker",
 				"gitcontext.rerank.model-url=https://custom/model.onnx",
@@ -245,6 +249,8 @@ class GitContextPropertiesTest {
 			assertThat(props.hybrid().candidates()).isEqualTo(30);
 			assertThat(props.hybrid().rrfK()).isEqualTo(40);
 			assertThat(props.hybrid().defaultMode()).isEqualTo(io.github.tarunipriya.gitcontext.retrieval.SearchMode.KEYWORD);
+			assertThat(props.hybrid().vectorWeight()).isEqualTo(0.8);
+			assertThat(props.hybrid().keywordWeight()).isEqualTo(0.4);
 
 			assertThat(props.rerank().enabled()).isTrue();
 			assertThat(props.rerank().modelName()).isEqualTo("custom-reranker");
@@ -341,6 +347,24 @@ class GitContextPropertiesTest {
 			assertThat(props.eval().reingest()).isFalse();
 			assertThat(props.eval().warmupQueries()).isEqualTo(2);
 			assertThat(props.eval().outputDir()).isEqualTo("eval/out");
+		});
+
+		// Comma-separated list containing ':' and '=' binds cleanly to List<String>
+		runner.withPropertyValues(
+				"gitcontext.eval.variants=VECTOR,KEYWORD,HYBRID,HYBRID:kw=0.75,HYBRID:kw=0.5,HYBRID:kw=0.25,HYBRID_RERANK,HYBRID_RERANK:kw=0.5"
+		).run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.eval().variants()).containsExactly(
+					"VECTOR",
+					"KEYWORD",
+					"HYBRID",
+					"HYBRID:kw=0.75",
+					"HYBRID:kw=0.5",
+					"HYBRID:kw=0.25",
+					"HYBRID_RERANK",
+					"HYBRID_RERANK:kw=0.5"
+			);
 		});
 	}
 
@@ -456,5 +480,29 @@ class GitContextPropertiesTest {
 		);
 		assertThat(props.ks()).containsExactly(5, 1, 10);
 		assertThat(props.maxK()).isEqualTo(10);
+	}
+
+	@Test
+	@DisplayName("HybridProperties validates vector and keyword weights: finite, >= 0, not both 0")
+	void testHybridPropertiesValidation() {
+		assertThatThrownBy(() -> new GitContextProperties.HybridProperties(
+				50, 60, io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID, -0.1, 1.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight must be finite and >= 0");
+
+		assertThatThrownBy(() -> new GitContextProperties.HybridProperties(
+				50, 60, io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID, 1.0, -0.5))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("keywordWeight must be finite and >= 0");
+
+		assertThatThrownBy(() -> new GitContextProperties.HybridProperties(
+				50, 60, io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID, Double.NaN, 1.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight must be finite and >= 0");
+
+		assertThatThrownBy(() -> new GitContextProperties.HybridProperties(
+				50, 60, io.github.tarunipriya.gitcontext.retrieval.SearchMode.HYBRID, 0.0, 0.0))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("vectorWeight and keywordWeight cannot both be 0");
 	}
 }
