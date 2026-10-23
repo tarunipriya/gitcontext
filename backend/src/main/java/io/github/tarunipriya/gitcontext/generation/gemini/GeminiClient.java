@@ -84,11 +84,14 @@ public class GeminiClient implements LlmClient {
 			throw new LlmUnavailableException("Gemini API key not set. Add LLM_API_KEY to the .env file at the repository root.");
 		}
 
-		String primaryModel = properties.llm().model();
+		String primaryModel = (request.model() != null && !request.model().isBlank())
+				? request.model()
+				: properties.llm().model();
+		boolean allowFallback = (request.model() == null || request.model().isBlank());
 		String fallbackModel = properties.llm().fallbackModel();
 		int maxRetries = properties.llm().maxRetries();
 
-		GeminiRequestDto primaryRequestDto = buildRequestDto(primaryModel, request.systemInstruction(), request.userPrompt());
+		GeminiRequestDto primaryRequestDto = buildRequestDto(primaryModel, request.systemInstruction(), request.userPrompt(), request.temperature());
 
 		if (log.isDebugEnabled()) {
 			String promptPreview = request.userPrompt();
@@ -109,12 +112,12 @@ public class GeminiClient implements LlmClient {
 			}
 			return buildResponse(responseDto, primaryModel, latency);
 		} catch (LlmRateLimitedException | ModelExecutionException ex) {
-			// If primary model failed with 429, 5xx, or 404, attempt fallback model once
-			if (fallbackModel != null && !fallbackModel.isBlank() && !fallbackModel.equalsIgnoreCase(primaryModel)) {
+			// If primary model failed with 429, 5xx, or 404, attempt fallback model once if fallback is allowed
+			if (allowFallback && fallbackModel != null && !fallbackModel.isBlank() && !fallbackModel.equalsIgnoreCase(primaryModel)) {
 				log.warn("Primary model '{}' execution failed ({}); attempting fallback model '{}'...",
 						primaryModel, ex.getMessage(), fallbackModel);
 				try {
-					GeminiRequestDto fallbackRequestDto = buildRequestDto(fallbackModel, request.systemInstruction(), request.userPrompt());
+					GeminiRequestDto fallbackRequestDto = buildRequestDto(fallbackModel, request.systemInstruction(), request.userPrompt(), request.temperature());
 					GeminiResponseDto fallbackDto = executeWithRetries(fallbackModel, fallbackRequestDto, 1);
 					long latency = System.currentTimeMillis() - start;
 					if (latency > 20_000L) {
@@ -140,8 +143,8 @@ public class GeminiClient implements LlmClient {
 		}
 	}
 
-	private GeminiRequestDto buildRequestDto(String model, String systemInstruction, String userPrompt) {
-		double temperature = properties.llm().temperature();
+	private GeminiRequestDto buildRequestDto(String model, String systemInstruction, String userPrompt, Double temperatureOverride) {
+		double temperature = (temperatureOverride != null) ? temperatureOverride : properties.llm().temperature();
 		int maxOutputTokens = properties.llm().maxOutputTokens();
 		GeminiRequestDto.GeminiThinkingConfigDto thinkingConfig = determineThinkingConfig(model);
 		return GeminiRequestDto.of(systemInstruction, userPrompt, temperature, maxOutputTokens, thinkingConfig);

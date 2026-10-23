@@ -141,6 +141,22 @@ class GitContextPropertiesTest {
 			assertThat(eval.reingest()).isTrue();
 			assertThat(eval.warmupQueries()).isEqualTo(1);
 			assertThat(eval.outputDir()).isEqualTo("eval/results");
+
+			// AnswerEval defaults
+			GitContextProperties.AnswerEvalProperties answerEval = props.answerEval();
+			assertThat(answerEval).isNotNull();
+			assertThat(answerEval.dataset()).isEqualTo("eval/datasets/gitcontext.jsonl");
+			assertThat(answerEval.repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(answerEval.reingest()).isTrue();
+			assertThat(answerEval.outputDir()).isEqualTo("eval/results");
+			assertThat(answerEval.requestDelayMs()).isEqualTo(13000L);
+			assertThat(answerEval.judgeEnabled()).isTrue();
+			assertThat(answerEval.judgeMaxSourceChars()).isEqualTo(6000);
+			assertThat(answerEval.maxCases()).isEqualTo(0);
+			assertThat(answerEval.maxConsecutiveFailures()).isEqualTo(3);
+			assertThat(answerEval.resume()).isTrue();
+			assertThat(answerEval.judgeModel()).isEmpty();
+			assertThat(answerEval.disableFallback()).isTrue();
 		});
 	}
 
@@ -204,7 +220,19 @@ class GitContextPropertiesTest {
 				"gitcontext.eval.exclude-tests=true",
 				"gitcontext.eval.reingest=false",
 				"gitcontext.eval.warmup-queries=0",
-				"gitcontext.eval.output-dir=eval/custom-output"
+				"gitcontext.eval.output-dir=eval/custom-output",
+				"gitcontext.answer-eval.dataset=eval/datasets/custom.jsonl",
+				"gitcontext.answer-eval.repo=custom/answer-repo",
+				"gitcontext.answer-eval.reingest=false",
+				"gitcontext.answer-eval.output-dir=eval/custom-answers",
+				"gitcontext.answer-eval.request-delay-ms=2500",
+				"gitcontext.answer-eval.judge-enabled=false",
+				"gitcontext.answer-eval.judge-max-source-chars=4000",
+				"gitcontext.answer-eval.max-cases=5",
+				"gitcontext.answer-eval.max-consecutive-failures=5",
+				"gitcontext.answer-eval.resume=false",
+				"gitcontext.answer-eval.judge-model=gemini-3.8-flash",
+				"gitcontext.answer-eval.disable-fallback=false"
 		).run(context -> {
 			assertThat(context).hasNotFailed();
 			GitContextProperties props = context.getBean(GitContextProperties.class);
@@ -281,6 +309,19 @@ class GitContextPropertiesTest {
 			assertThat(props.eval().reingest()).isFalse();
 			assertThat(props.eval().warmupQueries()).isEqualTo(0);
 			assertThat(props.eval().outputDir()).isEqualTo("eval/custom-output");
+
+			assertThat(props.answerEval().dataset()).isEqualTo("eval/datasets/custom.jsonl");
+			assertThat(props.answerEval().repo()).isEqualTo("custom/answer-repo");
+			assertThat(props.answerEval().reingest()).isFalse();
+			assertThat(props.answerEval().outputDir()).isEqualTo("eval/custom-answers");
+			assertThat(props.answerEval().requestDelayMs()).isEqualTo(2500L);
+			assertThat(props.answerEval().judgeEnabled()).isFalse();
+			assertThat(props.answerEval().judgeMaxSourceChars()).isEqualTo(4000);
+			assertThat(props.answerEval().maxCases()).isEqualTo(5);
+			assertThat(props.answerEval().maxConsecutiveFailures()).isEqualTo(5);
+			assertThat(props.answerEval().resume()).isFalse();
+			assertThat(props.answerEval().judgeModel()).isEqualTo("gemini-3.8-flash");
+			assertThat(props.answerEval().disableFallback()).isFalse();
 		});
 	}
 
@@ -366,6 +407,65 @@ class GitContextPropertiesTest {
 					"HYBRID_RERANK:kw=0.5"
 			);
 		});
+	}
+
+	@Test
+	@DisplayName("AnswerEval properties bind default and custom values, validating non-negative delay")
+	void testAnswerEvalPropertiesBinding() {
+		runner.run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.answerEval()).isNotNull();
+			assertThat(props.answerEval().dataset()).isEqualTo("eval/datasets/gitcontext.jsonl");
+			assertThat(props.answerEval().repo()).isEqualTo("tarunipriya/gitcontext");
+			assertThat(props.answerEval().reingest()).isTrue();
+			assertThat(props.answerEval().outputDir()).isEqualTo("eval/results");
+			assertThat(props.answerEval().requestDelayMs()).isEqualTo(13000L);
+			assertThat(props.answerEval().judgeEnabled()).isTrue();
+			assertThat(props.answerEval().judgeMaxSourceChars()).isEqualTo(6000);
+			assertThat(props.answerEval().maxCases()).isEqualTo(0);
+		});
+
+		runner.withPropertyValues(
+				"gitcontext.answer-eval.dataset=eval/datasets/smoke.jsonl",
+				"gitcontext.answer-eval.repo=test/custom-repo",
+				"gitcontext.answer-eval.reingest=false",
+				"gitcontext.answer-eval.output-dir=eval/custom-dir",
+				"gitcontext.answer-eval.request-delay-ms=1500",
+				"gitcontext.answer-eval.judge-enabled=false",
+				"gitcontext.answer-eval.judge-max-source-chars=3000",
+				"gitcontext.answer-eval.max-cases=3"
+		).run(context -> {
+			assertThat(context).hasNotFailed();
+			GitContextProperties props = context.getBean(GitContextProperties.class);
+			assertThat(props.answerEval()).isNotNull();
+			assertThat(props.answerEval().dataset()).isEqualTo("eval/datasets/smoke.jsonl");
+			assertThat(props.answerEval().repo()).isEqualTo("test/custom-repo");
+			assertThat(props.answerEval().reingest()).isFalse();
+			assertThat(props.answerEval().outputDir()).isEqualTo("eval/custom-dir");
+			assertThat(props.answerEval().requestDelayMs()).isEqualTo(1500L);
+			assertThat(props.answerEval().judgeEnabled()).isFalse();
+			assertThat(props.answerEval().judgeMaxSourceChars()).isEqualTo(3000);
+			assertThat(props.answerEval().maxCases()).isEqualTo(3);
+		});
+
+		// Negative requestDelayMs throws IllegalArgumentException
+		assertThatThrownBy(() -> new GitContextProperties.AnswerEvalProperties(
+				"eval/datasets/gitcontext.jsonl",
+				"tarunipriya/gitcontext",
+				true,
+				"eval/results",
+				-1L,
+				true,
+				6000,
+				0,
+				3,
+				true,
+				"",
+				true
+		))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("requestDelayMs must be non-negative");
 	}
 
 	@Test

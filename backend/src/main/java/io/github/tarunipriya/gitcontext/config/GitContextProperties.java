@@ -60,7 +60,8 @@ public record GitContextProperties(
 		@Valid @DefaultValue RerankProperties rerank,
 		@Valid @DefaultValue LlmProperties llm,
 		@Valid @DefaultValue DemoProperties demo,
-		@Valid @DefaultValue EvalProperties eval
+		@Valid @DefaultValue EvalProperties eval,
+		@Valid @DefaultValue AnswerEvalProperties answerEval
 ) {
 
 	/**
@@ -174,10 +175,63 @@ public record GitContextProperties(
 			String out = (eval.outputDir() != null && !eval.outputDir().isBlank()) ? eval.outputDir() : "eval/results";
 			eval = new EvalProperties(d, r, ks, vars, ext, rei, w, out);
 		}
+		if (answerEval == null) {
+			answerEval = new AnswerEvalProperties(
+					"eval/datasets/gitcontext.jsonl",
+					"tarunipriya/gitcontext",
+					true,
+					"eval/results",
+					13000L,
+					true,
+					6000,
+					0,
+					3,
+					true,
+					"",
+					true
+			);
+		} else {
+			String d = (answerEval.dataset() != null && !answerEval.dataset().isBlank()) ? answerEval.dataset() : "eval/datasets/gitcontext.jsonl";
+			String r = (answerEval.repo() != null && !answerEval.repo().isBlank()) ? answerEval.repo() : "tarunipriya/gitcontext";
+			boolean rei = answerEval.reingest();
+			String out = (answerEval.outputDir() != null && !answerEval.outputDir().isBlank()) ? answerEval.outputDir() : "eval/results";
+			long delay = answerEval.requestDelayMs() >= 0 ? answerEval.requestDelayMs() : 13000L;
+			boolean judge = answerEval.judgeEnabled();
+			int maxSrc = answerEval.judgeMaxSourceChars() > 0 ? answerEval.judgeMaxSourceChars() : 6000;
+			int maxC = answerEval.maxCases() >= 0 ? answerEval.maxCases() : 0;
+			int maxFail = answerEval.maxConsecutiveFailures() > 0 ? answerEval.maxConsecutiveFailures() : 3;
+			boolean res = answerEval.resume();
+			String jm = answerEval.judgeModel() != null ? answerEval.judgeModel() : "";
+			boolean df = answerEval.disableFallback();
+			answerEval = new AnswerEvalProperties(d, r, rei, out, delay, judge, maxSrc, maxC, maxFail, res, jm, df);
+		}
 	}
 
 	/**
-	 * Overloaded constructor preserving compatibility for callers with all properties except eval.
+	 * Overloaded constructor preserving compatibility for callers with all properties except answerEval.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid,
+			RerankProperties rerank,
+			LlmProperties llm,
+			DemoProperties demo,
+			EvalProperties eval
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, demo, eval, null);
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all properties except eval and answerEval.
 	 */
 	public GitContextProperties(
 			String githubToken,
@@ -195,11 +249,11 @@ public record GitContextProperties(
 			LlmProperties llm,
 			DemoProperties demo
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, demo, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, demo, null, null);
 	}
 
 	/**
-	 * Overloaded constructor preserving compatibility for callers with all properties except demo and eval.
+	 * Overloaded constructor preserving compatibility for callers with all properties except demo, eval, and answerEval.
 	 */
 	public GitContextProperties(
 			String githubToken,
@@ -216,7 +270,7 @@ public record GitContextProperties(
 			RerankProperties rerank,
 			LlmProperties llm
 	) {
-		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, null, null);
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, null, null, null);
 	}
 
 	/**
@@ -714,6 +768,64 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for running answer quality evaluations under {@code gitcontext.answer-eval}.
+	 *
+	 * @param dataset path to the evaluation dataset .jsonl file (default: "eval/datasets/gitcontext.jsonl")
+	 * @param repo target repository reference string (default: "tarunipriya/gitcontext")
+	 * @param reingest whether to reingest repository before evaluation (default: true)
+	 * @param outputDir directory path where evaluation reports are saved (default: "eval/results")
+	 * @param requestDelayMs delay in milliseconds between consecutive LLM calls to respect rate limits (default: 13000)
+	 * @param judgeEnabled whether the LLM judge is enabled for fact coverage and groundedness (default: true)
+	 * @param judgeMaxSourceChars maximum characters of cited sources passed to the judge (default: 6000)
+	 * @param maxCases maximum number of cases to evaluate, or 0 for all (default: 0)
+	 * @param maxConsecutiveFailures consecutive generation failures threshold to fail fast (default: 3)
+	 * @param resume whether to resume from existing checkpoint if present and valid (default: true)
+	 * @param judgeModel model identifier for LLM judge (default: "" = gitcontext.llm.model)
+	 * @param disableFallback whether fallback model is disabled during answer evaluation (default: true)
+	 */
+	public record AnswerEvalProperties(
+			@NotBlank @DefaultValue("eval/datasets/gitcontext.jsonl") String dataset,
+			@NotBlank @DefaultValue("tarunipriya/gitcontext") String repo,
+			@DefaultValue("true") boolean reingest,
+			@NotBlank @DefaultValue("eval/results") String outputDir,
+			@Min(0) @DefaultValue("13000") long requestDelayMs,
+			@DefaultValue("true") boolean judgeEnabled,
+			@Min(1) @DefaultValue("6000") int judgeMaxSourceChars,
+			@Min(0) @DefaultValue("0") int maxCases,
+			@Min(1) @DefaultValue("3") int maxConsecutiveFailures,
+			@DefaultValue("true") boolean resume,
+			@DefaultValue("") String judgeModel,
+			@DefaultValue("true") boolean disableFallback
+	) {
+		public AnswerEvalProperties {
+			if (dataset == null || dataset.isBlank()) {
+				dataset = "eval/datasets/gitcontext.jsonl";
+			}
+			if (repo == null || repo.isBlank()) {
+				repo = "tarunipriya/gitcontext";
+			}
+			if (outputDir == null || outputDir.isBlank()) {
+				outputDir = "eval/results";
+			}
+			if (requestDelayMs < 0) {
+				throw new IllegalArgumentException("requestDelayMs must be non-negative, got: " + requestDelayMs);
+			}
+			if (judgeMaxSourceChars <= 0) {
+				judgeMaxSourceChars = 6000;
+			}
+			if (maxCases < 0) {
+				maxCases = 0;
+			}
+			if (maxConsecutiveFailures <= 0) {
+				maxConsecutiveFailures = 3;
+			}
+			if (judgeModel == null) {
+				judgeModel = "";
+			}
+		}
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -748,7 +860,8 @@ public record GitContextProperties(
 				"rerank=" + rerank + ", " +
 				"llm=" + llm + ", " +
 				"demo=" + demo + ", " +
-				"eval=" + eval +
+				"eval=" + eval + ", " +
+				"answerEval=" + answerEval +
 				"]";
 	}
 

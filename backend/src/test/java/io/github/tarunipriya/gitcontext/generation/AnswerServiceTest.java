@@ -622,6 +622,57 @@ class AnswerServiceTest {
 		assertThat(passedHits.getFirst().hit().path()).isEqualTo("src/main/App.java");
 	}
 
+	@Test
+	@DisplayName("Standard /ask path passes null model override so configured model and fallback remain active")
+	void ask_standardPath_passesNullModelOverride() {
+		SearchHit hit = createSearchHit("c1", "src/main/App.java", 1, 10);
+		HybridSearchHit hybridHit = new HybridSearchHit(hit, 0.03, 0.9, 1, 10.0, 1, null, null);
+		Source source = new Source(1, hit, false);
+
+		when(hybridSearchService.search(eq(testRepo), eq("question"), eq(20), any(), any(), eq(SearchMode.HYBRID), eq(false), eq(true)))
+				.thenReturn(new HybridSearchResult(List.of(hybridHit), SearchMode.HYBRID, false, List.of(), 15L, 10L, 5L, 0L, 30L));
+		when(contextBuilder.buildContext(any(), eq(8)))
+				.thenReturn(new ContextBuilder.ContextBuildResult(List.of(source), "Context", 100));
+		when(promptTemplates.systemInstruction()).thenReturn("System instruction");
+		when(promptTemplates.buildUserPrompt("question", "Context")).thenReturn("User prompt");
+		when(llmClient.generate(any(LlmRequest.class)))
+				.thenReturn(new LlmResponse("Answer [1]", "gemini-3.8-flash", 10, 5, 0, "STOP", 100L));
+		when(citationParser.parse(any(), any()))
+				.thenReturn(new CitationParser.CitationParseResult("Answer [1]", List.of(), List.of(source), 0));
+
+		answerService.ask(testRepo, "question");
+
+		org.mockito.ArgumentCaptor<LlmRequest> reqCaptor = org.mockito.ArgumentCaptor.forClass(LlmRequest.class);
+		verify(llmClient).generate(reqCaptor.capture());
+		assertThat(reqCaptor.getValue().model()).isNull();
+	}
+
+	@Test
+	@DisplayName("AnswerOptions with modelOverride passes model override to LlmRequest")
+	void ask_withModelOverride_passesModelToLlmRequest() {
+		SearchHit hit = createSearchHit("c1", "src/main/App.java", 1, 10);
+		HybridSearchHit hybridHit = new HybridSearchHit(hit, 0.03, 0.9, 1, 10.0, 1, null, null);
+		Source source = new Source(1, hit, false);
+
+		when(hybridSearchService.search(eq(testRepo), eq("question"), eq(20), any(), any(), eq(SearchMode.HYBRID), eq(false), eq(true)))
+				.thenReturn(new HybridSearchResult(List.of(hybridHit), SearchMode.HYBRID, false, List.of(), 15L, 10L, 5L, 0L, 30L));
+		when(contextBuilder.buildContext(any(), eq(8)))
+				.thenReturn(new ContextBuilder.ContextBuildResult(List.of(source), "Context", 100));
+		when(promptTemplates.systemInstruction()).thenReturn("System instruction");
+		when(promptTemplates.buildUserPrompt("question", "Context")).thenReturn("User prompt");
+		when(llmClient.generate(any(LlmRequest.class)))
+				.thenReturn(new LlmResponse("Answer [1]", "gemini-3.5-flash", 10, 5, 0, "STOP", 100L));
+		when(citationParser.parse(any(), any()))
+				.thenReturn(new CitationParser.CitationParseResult("Answer [1]", List.of(), List.of(source), 0));
+
+		AnswerOptions options = new AnswerOptions(SearchMode.HYBRID, true, false, 8, 20, List.of(), "gemini-3.5-flash");
+		answerService.ask(testRepo, "question", options);
+
+		org.mockito.ArgumentCaptor<LlmRequest> reqCaptor = org.mockito.ArgumentCaptor.forClass(LlmRequest.class);
+		verify(llmClient).generate(reqCaptor.capture());
+		assertThat(reqCaptor.getValue().model()).isEqualTo("gemini-3.5-flash");
+	}
+
 	private SearchHit createSearchHit(String chunkId, String path, int startLine, int endLine) {
 		return new SearchHit(
 				"uuid-1",

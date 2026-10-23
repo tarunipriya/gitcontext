@@ -120,6 +120,47 @@ class GeminiClientTest {
 	}
 
 	@Test
+	@DisplayName("generate uses temperature override from request when set, and config value when null")
+	void generate_temperatureOverride_honorsRequestWhenSetAndConfigWhenNull() {
+		String responseJson = """
+				{
+				  "candidates": [
+				    {
+				      "content": {
+				        "parts": [
+				          { "text": "Response text." }
+				        ],
+				        "role": "model"
+				      },
+				      "finishReason": "STOP",
+				      "index": 0
+				    }
+				  ]
+				}
+				""";
+
+		// 1. Explicit temperature override (e.g. 0.0 for judge)
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andExpect(method(HttpMethod.POST))
+				.andExpect(jsonPath("$.generationConfig.temperature").value(0.0))
+				.andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+		geminiClient.generate(new LlmRequest("judge system", "judge prompt", 0.0));
+		mockServer.verify();
+
+		mockServer.reset();
+
+		// 2. Null temperature uses config value (0.2)
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andExpect(method(HttpMethod.POST))
+				.andExpect(jsonPath("$.generationConfig.temperature").value(0.2))
+				.andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+		geminiClient.generate(new LlmRequest("system prompt", "user question"));
+		mockServer.verify();
+	}
+
+	@Test
 	@DisplayName("generate throws LlmUnavailableException with clear message when key is missing")
 	void generate_missingApiKey_throwsLlmUnavailableException() {
 		GitContextProperties noKeyProps = new GitContextProperties(
@@ -449,5 +490,44 @@ class GeminiClientTest {
 		assertThat(response.text()).isEqualTo("Answer from fallback model after timeout");
 		assertThat(response.model()).isEqualTo("gemini-3.5-flash");
 		assertThat(sleepCallCount.get()).isEqualTo(2);
+	}
+
+	@Test
+	@DisplayName("generate does not attempt fallback when explicit model override is provided in request")
+	void generate_withExplicitModel_doesNotFallBackOnFailure() {
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+
+		LlmRequest request = new LlmRequest(null, "query", null, "gemini-3.8-flash");
+
+		assertThatThrownBy(() -> geminiClient.generate(request))
+				.isInstanceOf(LlmUnavailableException.class)
+				.hasMessageContaining("Gemini API request timed out");
+
+		mockServer.verify();
+		assertThat(sleepCallCount.get()).isEqualTo(2);
+	}
+
+	@Test
+	@DisplayName("generate does not attempt fallback when explicit model fails with 429")
+	void generate_withExplicitModel_doesNotFallBackOn429() {
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).body("Rate limited").contentType(MediaType.APPLICATION_JSON));
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).body("Rate limited").contentType(MediaType.APPLICATION_JSON));
+		mockServer.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).body("Rate limited").contentType(MediaType.APPLICATION_JSON));
+
+		LlmRequest request = new LlmRequest(null, "query", null, "gemini-3.8-flash");
+
+		assertThatThrownBy(() -> geminiClient.generate(request))
+				.isInstanceOf(LlmRateLimitedException.class)
+				.hasMessageContaining("Gemini API rate limit exceeded");
+
+		mockServer.verify();
 	}
 }
