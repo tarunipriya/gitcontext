@@ -1,5 +1,7 @@
 # GitContext
 
+[![CI](https://github.com/tarunipriya/gitcontext/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tarunipriya/gitcontext/actions/workflows/ci.yml)
+
 A RAG developer copilot that answers questions about a GitHub repository using its source code, docs, commit history, PR discussions, and incident reports, with cited answers.
 
 Built with **Java 25** and **Spring Boot**.
