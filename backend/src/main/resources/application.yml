@@ -10,6 +10,7 @@ server:
 
 springdotenv:
   directory: ..
+  ignore-if-missing: true
 
 gitcontext:
   github-token: ${GITHUB_TOKEN:}
