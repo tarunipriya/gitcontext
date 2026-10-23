@@ -4,7 +4,50 @@ A RAG developer copilot that answers questions about a GitHub repository using i
 
 Built with **Java 25** and **Spring Boot**.
 
-> 🚧 Under active development.
+> 🚧 Under active development — Phase 6 (evaluation) complete.
+
+## Results
+
+Measured with the evaluation suite in `eval/` on two repositories: this repository and the held-out [`spring-projects/spring-petclinic`](https://github.com/spring-projects/spring-petclinic). Datasets were written before running and not tuned afterwards.
+
+**Headline (default configuration: hybrid BM25 + vector, equal-weight RRF, no reranker):** 73–75% Recall@5 across both repositories at under 70 ms p50 retrieval latency; 92% answer fact coverage with 90.6% of answers citing an expected source.
+
+### Retrieval (k = 5)
+
+| Variant | gitcontext Recall@5 | gitcontext p50 | petclinic Recall@5 | petclinic p50 |
+|---|---|---|---|---|
+| Vector (BGE-small) | 0.750 | 25 ms | 0.613 | 25 ms |
+| Keyword (Lucene BM25) | 0.531 | 11 ms | 0.649 | 13 ms |
+| **Hybrid RRF (default)** | **0.750** | **69 ms** | **0.732** | **46 ms** |
+| Hybrid RRF, keyword weight 0.5 | 0.828 | 64 ms | 0.685 | 38 ms |
+| Hybrid + cross-encoder rerank | 0.813 | 3305 ms | 0.613 | 3010 ms |
+
+gitcontext: 32 answerable questions at commit `1746672`; petclinic: 28 answerable questions at commit `500158f`. Questions cover code, docs, configuration and Git history (pull requests and commits).
+
+**What the numbers show**
+- **Hybrid is the robust choice.** Vector search is stronger on this repository, BM25 is stronger on petclinic (descriptive class names match question words), and hybrid matches or beats the best single retriever on both.
+- **A tuned fusion weight did not generalize.** Lowering the keyword weight to 0.5 raised gitcontext Recall@5 from 0.750 to 0.828 but lowered petclinic from 0.732 to 0.685, so the default stays at 1.0.
+- **The reranker is off by default.** `ms-marco-MiniLM-L-6-v2` is trained on web search, not code: it hurt petclinic (0.613 vs 0.732) and costs ~3 s per query on CPU.
+
+### Answer quality (gitcontext, 35 questions)
+
+Answer model `gemini-3.5-flash`, graded by a separate judge model `gemini-3.5-flash-lite` at temperature 0, commit `863d682`.
+
+| Metric | Value |
+|---|---|
+| Mean fact coverage | 0.923 |
+| Fully correct answers | 0.893 (25 of 28 graded) |
+| Answers citing an expected source | 0.906 |
+| Correct refusals on unanswerable questions | 1.000 (3 of 3) |
+| False refusals on answerable questions | 0.125 (4 of 32) |
+| Groundedness (judge) | 1.000 |
+| End-to-end latency | p50 4.3 s, p95 11.7 s |
+
+Incomplete answers occur on exactly the questions where hybrid retrieval missed the source, and most false refusals are Git-history questions, so answer quality is bounded by retrieval quality. Groundedness of 1.000 means the judge found no obvious unsupported claims; a small judge from the same model family can be lenient, so it is not proof of zero hallucination.
+
+### Reproduce
+
+Datasets: [`eval/datasets/`](eval/datasets/). Full reports with per-question results: [`eval/results/`](eval/results/) — `gitcontext-20261021-160519.md`, `spring-petclinic-20261021-163602.md`, `answers-gitcontext-20261023-153022.md`. Commands are in the [Evaluation](#evaluation) section below.
 
 ## Running Qdrant
 
@@ -27,7 +70,7 @@ GitContext supports an optional second-stage cross-encoder reranker (`ms-marco-M
 
 - **Opt-in**: Reranking is disabled by default (`gitcontext.rerank.enabled=false`) and can be enabled per search request via `?rerank=true`.
 - **Benchmark Findings**: In local benchmarks across 5 code questions on CPU, reranking 30 candidates took 4,000–7,000 ms. Because `ms-marco-MiniLM-L-6-v2` is a general web-trained text model, it hurt ranking on 2 of 5 code questions, helped on 1, and tied on 2 compared to pure hybrid RRF.
-- **Future Outlook**: This design decision will be formally revisited during the Phase 6 evaluation suite, with consideration for a code-aware cross-encoder model.
+- **Phase 6 result**: On the held-out spring-petclinic evaluation the reranker lowered Recall@5 from 0.732 to 0.613 at ~3 s per query, so it remains opt-in. A code-aware cross-encoder is future work.
 
 ## Answer Generation
 
