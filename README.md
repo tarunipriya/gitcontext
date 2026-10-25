@@ -125,6 +125,30 @@ $response.answer
 $response.citations | Format-Table number, path, startLine, endLine, url
 ```
 
+## Web UI
+
+GitContext includes a React + TypeScript web frontend in `frontend/` featuring the Ask interface with grounded markdown answers, clickable verified citations, a retrieved sources panel, and latency telemetry.
+
+### Running on Windows
+
+1. **Start Qdrant**:
+   ```powershell
+   docker compose up -d
+   ```
+2. **Start the backend** (runs on port 8081):
+   ```powershell
+   cd backend
+   .\mvnw.cmd spring-boot:run
+   ```
+3. **Start the frontend** (Vite dev server with `/api` proxy to port 8081):
+   ```powershell
+   cd frontend
+   npm install
+   npm run dev
+   ```
+4. **Open in browser**:
+   Navigate to [http://localhost:5173](http://localhost:5173).
+
 ## Evaluation
 
 GitContext includes an automated retrieval evaluation benchmark runner comparing `VECTOR`, `KEYWORD`, `HYBRID` (RRF), and `HYBRID_RERANK` search strategies on JSONL benchmark datasets.
