@@ -134,4 +134,50 @@ class ChunkPointMapperTest {
 		assertThat(hit.text()).isEqualTo(chunk.text());
 		assertThat(hit.content()).isEqualTo(chunk.content());
 	}
+
+	@Test
+	@DisplayName("computeEmbedHash computes sha256 of modelId + newline + chunk text and validates nulls")
+	void testComputeEmbedHash() {
+		String modelId = "bge-small-en-v1.5-q";
+		String text = "public void foo() {}";
+		String expected = Hashing.sha256(modelId + "\n" + text);
+
+		assertThat(ChunkPointMapper.computeEmbedHash(modelId, text)).isEqualTo(expected);
+
+		assertThatThrownBy(() -> ChunkPointMapper.computeEmbedHash(null, text))
+				.isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> ChunkPointMapper.computeEmbedHash(modelId, null))
+				.isInstanceOf(NullPointerException.class);
+	}
+
+	@Test
+	@DisplayName("toPoint and toPayload include embedHash in payload when provided")
+	void testPayloadIncludesEmbedHash() {
+		RepoRef repo = RepoRef.parse("testowner/testrepo");
+		ChunkMetadata metadata = new ChunkMetadata(
+				"testowner/testrepo",
+				SourceType.CODE,
+				"Foo.java",
+				"java",
+				null,
+				null,
+				null,
+				null,
+				ChunkType.METHOD,
+				"foo",
+				null,
+				null,
+				1,
+				5,
+				20
+		);
+		Chunk chunk = new Chunk("doc-1", 0, "void foo() {}", "void foo() {}", metadata);
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", chunk.text());
+
+		QdrantPoint point = mapper.toPoint(chunk, new float[]{0.1f}, repo, "run-1", hash);
+		assertThat(point.payload()).containsEntry("embedHash", hash);
+
+		QdrantPoint pointWithoutHash = mapper.toPoint(chunk, new float[]{0.1f}, repo, "run-1");
+		assertThat(pointWithoutHash.payload()).doesNotContainKey("embedHash");
+	}
 }

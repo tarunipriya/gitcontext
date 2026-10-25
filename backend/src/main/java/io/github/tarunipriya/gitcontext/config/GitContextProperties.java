@@ -61,7 +61,8 @@ public record GitContextProperties(
 		@Valid @DefaultValue LlmProperties llm,
 		@Valid @DefaultValue DemoProperties demo,
 		@Valid @DefaultValue EvalProperties eval,
-		@Valid @DefaultValue AnswerEvalProperties answerEval
+		@Valid @DefaultValue AnswerEvalProperties answerEval,
+		@Valid @DefaultValue IndexingProperties indexing
 ) {
 
 	/**
@@ -205,10 +206,37 @@ public record GitContextProperties(
 			boolean df = answerEval.disableFallback();
 			answerEval = new AnswerEvalProperties(d, r, rei, out, delay, judge, maxSrc, maxC, maxFail, res, jm, df);
 		}
+		if (indexing == null) {
+			indexing = new IndexingProperties(true);
+		}
 	}
 
 	/**
-	 * Overloaded constructor preserving compatibility for callers with all properties except answerEval.
+	 * Overloaded constructor preserving compatibility for callers with all properties except indexing.
+	 */
+	public GitContextProperties(
+			String githubToken,
+			Path reposDir,
+			String qdrantUrl,
+			String llmApiKey,
+			IngestionProperties ingestion,
+			GitHubProperties github,
+			ChunkingProperties chunking,
+			EmbeddingProperties embedding,
+			QdrantProperties qdrant,
+			KeywordProperties keyword,
+			HybridProperties hybrid,
+			RerankProperties rerank,
+			LlmProperties llm,
+			DemoProperties demo,
+			EvalProperties eval,
+			AnswerEvalProperties answerEval
+	) {
+		this(githubToken, reposDir, qdrantUrl, llmApiKey, ingestion, github, chunking, embedding, qdrant, keyword, hybrid, rerank, llm, demo, eval, answerEval, null);
+	}
+
+	/**
+	 * Overloaded constructor preserving compatibility for callers with all properties except answerEval and indexing.
 	 */
 	public GitContextProperties(
 			String githubToken,
@@ -826,6 +854,16 @@ public record GitContextProperties(
 	}
 
 	/**
+	 * Configuration properties for vector indexing under {@code gitcontext.indexing}.
+	 *
+	 * @param reuseEmbeddings whether unchanged chunk embeddings are reused across re-indexing runs (default: true)
+	 */
+	public record IndexingProperties(
+			@DefaultValue("true") boolean reuseEmbeddings
+	) {
+	}
+
+	/**
 	 * Returns {@code true} if a non-blank GitHub personal access token is configured.
 	 *
 	 * @return true if GitHub token is present and non-blank
@@ -861,7 +899,8 @@ public record GitContextProperties(
 				"llm=" + llm + ", " +
 				"demo=" + demo + ", " +
 				"eval=" + eval + ", " +
-				"answerEval=" + answerEval +
+				"answerEval=" + answerEval + ", " +
+				"indexing=" + indexing +
 				"]";
 	}
 

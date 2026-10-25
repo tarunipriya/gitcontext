@@ -24,6 +24,7 @@ public class LocalBgeEmbeddingService implements EmbeddingService {
 
 	private static final Logger log = LoggerFactory.getLogger(LocalBgeEmbeddingService.class);
 	private static final int DIMENSION = 384;
+	private static final String MODEL_ID = "bge-small-en-v1.5-q";
 
 	private final GitContextProperties properties;
 	private volatile EmbeddingModel model;
@@ -40,6 +41,11 @@ public class LocalBgeEmbeddingService implements EmbeddingService {
 	@Override
 	public int dimension() {
 		return DIMENSION;
+	}
+
+	@Override
+	public String modelId() {
+		return MODEL_ID;
 	}
 
 	@Override

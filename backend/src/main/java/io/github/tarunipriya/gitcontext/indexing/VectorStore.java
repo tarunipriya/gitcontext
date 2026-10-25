@@ -9,7 +9,9 @@ import io.github.tarunipriya.gitcontext.model.Chunk;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +69,24 @@ public class VectorStore {
 	 * @param chunks chunks to index
 	 * @return execution summary detailing point counts and elapsed durations
 	 */
+	/**
+	 * Represents an existing point's cached embedding hash and vector.
+	 */
+	private record ExistingPoint(String embedHash, float[] vector) {
+	}
+
+	/**
+	 * Indexes a list of chunks for a repository under a specific run identifier.
+	 *
+	 * <p>Ensures the target collection exists. When {@code gitcontext.indexing.reuse-embeddings} is enabled,
+	 * queries existing repository points via {@link QdrantClient#scroll} and reuses cached embeddings for unchanged
+	 * chunks, embedding only new or modified chunks. All points are upserted with the new {@code runId}.
+	 *
+	 * @param repo repository reference
+	 * @param runId indexing run identifier
+	 * @param chunks chunks to index
+	 * @return execution summary detailing point counts and elapsed durations
+	 */
 	public IndexSummary index(RepoRef repo, String runId, List<Chunk> chunks) {
 		Objects.requireNonNull(repo, "repo must not be null");
 		Objects.requireNonNull(runId, "runId must not be null");
@@ -76,19 +96,89 @@ public class VectorStore {
 		qdrantClient.ensureCollection(collection, embeddingService.dimension());
 
 		if (chunks.isEmpty()) {
-			return new IndexSummary(0, 0L, 0L);
+			return new IndexSummary(0, 0, 0, 0L, 0L);
 		}
 
 		log.info("Indexing {} chunks for {} (runId: {})", chunks.size(), repo.fullName(), runId);
 
+		boolean reuse = properties.indexing() != null && properties.indexing().reuseEmbeddings();
+		Map<String, ExistingPoint> existingPoints = new HashMap<>();
+
+		if (reuse) {
+			try {
+				Map<String, Object> filter = Map.of(
+						"must", List.of(Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())))
+				);
+				List<QdrantPoint> scrolled = qdrantClient.scroll(
+						collection,
+						filter,
+						true,
+						properties.qdrant().upsertBatchSize()
+				);
+				for (QdrantPoint p : scrolled) {
+					if (p.id() != null && p.payload() != null) {
+						Object hashObj = p.payload().get("embedHash");
+						String hash = hashObj != null ? hashObj.toString() : null;
+						existingPoints.put(p.id(), new ExistingPoint(hash, p.vector()));
+					}
+				}
+			} catch (Exception ex) {
+				log.warn("Failed to scroll existing points for incremental re-indexing of {}: {}. Falling back to full embedding.",
+						repo.fullName(), ex.getMessage());
+				existingPoints.clear();
+			}
+		}
+
+		String modelId = embeddingService.modelId();
+		int expectedDimension = embeddingService.dimension();
+
+		List<float[]> vectors = new ArrayList<>(Collections.nCopies(chunks.size(), (float[]) null));
+		List<String> embedHashes = new ArrayList<>(chunks.size());
+		List<Chunk> chunksToEmbed = new ArrayList<>();
+		List<Integer> indicesToEmbed = new ArrayList<>();
+		int reusedCount = 0;
+
+		for (int i = 0; i < chunks.size(); i++) {
+			Chunk chunk = chunks.get(i);
+			String embedHash = ChunkPointMapper.computeEmbedHash(modelId, chunk.text());
+			embedHashes.add(embedHash);
+
+			String pointId = ChunkPointMapper.chunkIdToUuid(chunk.id());
+			ExistingPoint existing = existingPoints.get(pointId);
+
+			if (reuse && existing != null
+					&& Objects.equals(existing.embedHash(), embedHash)
+					&& existing.vector() != null
+					&& existing.vector().length == expectedDimension) {
+				vectors.set(i, existing.vector());
+				reusedCount++;
+			} else {
+				chunksToEmbed.add(chunk);
+				indicesToEmbed.add(i);
+			}
+		}
+
 		long embedStart = System.currentTimeMillis();
-		List<String> texts = chunks.stream().map(Chunk::text).toList();
-		List<float[]> vectors = embeddingService.embedDocuments(texts);
+		List<float[]> newVectors;
+		if (!chunksToEmbed.isEmpty()) {
+			List<String> textsToEmbed = chunksToEmbed.stream().map(Chunk::text).toList();
+			newVectors = embeddingService.embedDocuments(textsToEmbed);
+		} else {
+			newVectors = embeddingService.embedDocuments(List.of());
+		}
 		long embedMillis = System.currentTimeMillis() - embedStart;
+
+		for (int j = 0; j < chunksToEmbed.size(); j++) {
+			int chunkIndex = indicesToEmbed.get(j);
+			vectors.set(chunkIndex, newVectors.get(j));
+		}
+
+		int embeddedCount = chunksToEmbed.size();
+		log.info("Embedded {} of {} chunks ({} reused) in {} ms", embeddedCount, chunks.size(), reusedCount, embedMillis);
 
 		List<QdrantPoint> points = new ArrayList<>(chunks.size());
 		for (int i = 0; i < chunks.size(); i++) {
-			points.add(chunkPointMapper.toPoint(chunks.get(i), vectors.get(i), repo, runId));
+			points.add(chunkPointMapper.toPoint(chunks.get(i), vectors.get(i), repo, runId, embedHashes.get(i)));
 		}
 
 		long upsertStart = System.currentTimeMillis();
@@ -98,7 +188,7 @@ public class VectorStore {
 		log.info("Indexed {} chunks for {} in {} ms (embed: {} ms, upsert: {} ms)",
 				chunks.size(), repo.fullName(), embedMillis + upsertMillis, embedMillis, upsertMillis);
 
-		return new IndexSummary(chunks.size(), embedMillis, upsertMillis);
+		return new IndexSummary(chunks.size(), embeddedCount, reusedCount, embedMillis, upsertMillis);
 	}
 
 	/**

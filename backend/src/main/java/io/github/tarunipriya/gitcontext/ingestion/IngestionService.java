@@ -187,11 +187,15 @@ public class IngestionService {
 		// Stage 7: Indexing (non-fatal)
 		long indexStart = System.currentTimeMillis();
 		int indexedPoints = 0;
+		int embeddedChunks = 0;
+		int reusedChunks = 0;
 		long embedMillis = 0L;
 		long upsertMillis = 0L;
 		try {
 			IndexSummary indexSummary = vectorStore.index(repo, runId, chunks);
 			indexedPoints = indexSummary.count();
+			embeddedChunks = indexSummary.embeddedChunks();
+			reusedChunks = indexSummary.reusedChunks();
 			embedMillis = indexSummary.embedMillis();
 			upsertMillis = indexSummary.upsertMillis();
 			try {
@@ -267,6 +271,8 @@ public class IngestionService {
 				avgTokens,
 				maxTokens,
 				indexedPoints,
+				embeddedChunks,
+				reusedChunks,
 				embedMillis,
 				upsertMillis,
 				stageDurations,
