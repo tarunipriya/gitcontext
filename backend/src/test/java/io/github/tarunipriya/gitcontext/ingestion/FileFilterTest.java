@@ -248,4 +248,49 @@ class FileFilterTest {
 
 		assertThat(emptyPrefixFilter.shouldIngest(tempDir, evalJava)).isTrue();
 	}
+
+	@Test
+	@DisplayName("isExcludedPath identifies excluded root path prefixes")
+	void testIsExcludedPathPrefixes() {
+		assertThat(fileFilter.isExcludedPath("eval/datasets/smoke.jsonl")).isTrue();
+		assertThat(fileFilter.isExcludedPath("eval/README.md")).isTrue();
+		assertThat(fileFilter.isExcludedPath("eval\\results\\summary.json")).isTrue();
+		assertThat(fileFilter.isExcludedPath("./eval/cases.json")).isTrue();
+		assertThat(fileFilter.isExcludedPath("/eval/cases.json")).isTrue();
+
+		// Nested eval directory must NOT be excluded
+		assertThat(fileFilter.isExcludedPath("src/eval/Foo.java")).isFalse();
+		assertThat(fileFilter.isExcludedPath("backend/src/main/java/evaluation/EvalRunner.java")).isFalse();
+	}
+
+	@Test
+	@DisplayName("isExcludedPath identifies excluded directories, lock files, and minified patterns")
+	void testIsExcludedPathDirectoriesAndPatterns() {
+		// Excluded directories
+		assertThat(fileFilter.isExcludedPath("node_modules/pkg/index.js")).isTrue();
+		assertThat(fileFilter.isExcludedPath(".git/HEAD")).isTrue();
+		assertThat(fileFilter.isExcludedPath("target/classes/App.class")).isTrue();
+		assertThat(fileFilter.isExcludedPath("sub/node_modules/foo.js")).isTrue();
+
+		// Lock files
+		assertThat(fileFilter.isExcludedPath("package-lock.json")).isTrue();
+		assertThat(fileFilter.isExcludedPath("yarn.lock")).isTrue();
+		assertThat(fileFilter.isExcludedPath("pnpm-lock.yaml")).isTrue();
+
+		// Minified patterns
+		assertThat(fileFilter.isExcludedPath("bundle.min.js")).isTrue();
+		assertThat(fileFilter.isExcludedPath("dist/app.min.js")).isTrue();
+		assertThat(fileFilter.isExcludedPath("style.min.css")).isTrue();
+
+		// Normal code, documentation, and configuration files must not be excluded
+		assertThat(fileFilter.isExcludedPath("src/main/java/App.java")).isFalse();
+		assertThat(fileFilter.isExcludedPath("README.md")).isFalse();
+		assertThat(fileFilter.isExcludedPath("pom.xml")).isFalse();
+		assertThat(fileFilter.isExcludedPath("application.yml")).isFalse();
+
+		// Null or blank paths are treated as excluded
+		assertThat(fileFilter.isExcludedPath(null)).isTrue();
+		assertThat(fileFilter.isExcludedPath("")).isTrue();
+		assertThat(fileFilter.isExcludedPath("   ")).isTrue();
+	}
 }

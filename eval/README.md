@@ -8,13 +8,15 @@ This directory houses the evaluation datasets, benchmark definitions, and ground
 
 The `eval/` folder is **strictly excluded** from repository ingestion by default (configured via `gitcontext.ingestion.exclude-path-prefixes: ["eval/"]`).
 
+> **Leakage Note:** Evaluation files are excluded from **file ingestion AND from commit diffs**. `CommitIngestor` skips all diff entries matching excluded path prefixes (`eval/`), excluded directories, lock files, and minified patterns. When a commit touches only excluded paths, its document is indexed with commit metadata only and the note `(changes limited to excluded paths)`.
+
 ### Why is this necessary?
 If benchmark questions, expected answers, and ground-truth file mappings were ingested into GitContext:
 - Ground-truth files would be embedded into Qdrant vector storage and indexed into Apache Lucene BM25 keyword indices.
-- Retrieval queries matching benchmark questions would artificially retrieve the evaluation definitions themselves rather than the actual repository source code.
+- Retrieval queries matching benchmark questions would artificially retrieve the evaluation definitions themselves (or commit diffs introducing them) rather than the actual repository source code.
 - Metrics such as Recall@K, Precision@K, HitRate@K, nDCG@K, and answer correctness would be artificially inflated (test-set contamination).
 
-Root path prefix matching ensures that files in `eval/` (e.g. `eval/datasets/smoke.jsonl`) are excluded from ingestion while allowing legitimate code files named `eval` in nested source directories (such as `backend/src/main/java/.../evaluation/`) to be ingested normally.
+Root path prefix matching ensures that files in `eval/` (e.g. `eval/datasets/smoke.jsonl`) and their commit diffs are excluded from ingestion while allowing legitimate code files named `eval` in nested source directories (such as `backend/src/main/java/.../evaluation/`) to be ingested normally.
 
 ---
 

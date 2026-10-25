@@ -107,6 +107,77 @@ public class FileFilter {
 	}
 
 	/**
+	 * Determines whether the given repository-relative path matches any exclusion criteria.
+	 *
+	 * <p>Exclusion criteria checked by path include:
+	 * <ul>
+	 *   <li>Path prefix exclusion from repository root (e.g. {@code eval/})</li>
+	 *   <li>Directory exclusion (e.g. {@code node_modules}, {@code .git}, {@code target})</li>
+	 *   <li>Lock file exclusion (e.g. {@code package-lock.json}, {@code yarn.lock})</li>
+	 *   <li>Minified asset patterns (e.g. {@code *.min.js}, {@code *.min.css})</li>
+	 * </ul>
+	 *
+	 * @param repoRelativePath relative path to the candidate file from repository root
+	 * @return {@code true} if the path is excluded by prefix, directory, lock file, or minified pattern
+	 */
+	public boolean isExcludedPath(String repoRelativePath) {
+		if (repoRelativePath == null || repoRelativePath.isBlank()) {
+			return true;
+		}
+
+		String normalizedPosix = repoRelativePath.replace('\\', '/').trim();
+		while (normalizedPosix.startsWith("./") || normalizedPosix.startsWith("/")) {
+			if (normalizedPosix.startsWith("./")) {
+				normalizedPosix = normalizedPosix.substring(2);
+			} else {
+				normalizedPosix = normalizedPosix.substring(1);
+			}
+		}
+		if (normalizedPosix.isEmpty()) {
+			return true;
+		}
+		String normalizedPosixLower = normalizedPosix.toLowerCase(Locale.ROOT);
+
+		// 0. Check path prefix exclusion from repository root (e.g. eval/)
+		for (String prefix : excludePathPrefixesLower) {
+			if (normalizedPosixLower.startsWith(prefix)) {
+				return true;
+			}
+		}
+
+		String[] segments = normalizedPosix.split("/");
+
+		// 1. Check excluded directory segments (all parent segments)
+		for (int i = 0; i < segments.length - 1; i++) {
+			if (excludeDirsLower.contains(segments[i].toLowerCase(Locale.ROOT))) {
+				return true;
+			}
+		}
+
+		String fileName = segments[segments.length - 1];
+		String fileNameLower = fileName.toLowerCase(Locale.ROOT);
+
+		// 2. Check lock files
+		if (excludeLockFilesLower.contains(fileNameLower)) {
+			return true;
+		}
+
+		// 3. Check minified patterns
+		Path fileNamePath = Path.of(fileName);
+		Path fileNameLowerPath = Path.of(fileNameLower);
+		Path relPath = Path.of(normalizedPosix);
+		for (PathMatcher matcher : minifiedPathMatchers) {
+			if (matcher.matches(fileNamePath)
+					|| matcher.matches(fileNameLowerPath)
+					|| matcher.matches(relPath)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Determines whether the given file should be ingested.
 	 *
 	 * @param repoRoot root directory of the repository
@@ -123,50 +194,11 @@ public class FileFilter {
 				: filePath;
 
 		String posixPath = relativePath.toString().replace('\\', '/');
-		String normalizedPosix = posixPath;
-		while (normalizedPosix.startsWith("./") || normalizedPosix.startsWith("/")) {
-			if (normalizedPosix.startsWith("./")) {
-				normalizedPosix = normalizedPosix.substring(2);
-			} else {
-				normalizedPosix = normalizedPosix.substring(1);
-			}
-		}
-		String normalizedPosixLower = normalizedPosix.toLowerCase(Locale.ROOT);
-
-		// 0. Check path prefix exclusion from repository root (e.g. eval/)
-		for (String prefix : excludePathPrefixesLower) {
-			if (normalizedPosixLower.startsWith(prefix)) {
-				return false;
-			}
-		}
-
-		String[] segments = posixPath.split("/");
-
-		// 1. Check excluded directory segments (all parent segments)
-		for (int i = 0; i < segments.length - 1; i++) {
-			if (excludeDirsLower.contains(segments[i].toLowerCase(Locale.ROOT))) {
-				return false;
-			}
-		}
-
-		String fileName = segments[segments.length - 1];
-		String fileNameLower = fileName.toLowerCase(Locale.ROOT);
-
-		// 2. Check lock files
-		if (excludeLockFilesLower.contains(fileNameLower)) {
+		if (isExcludedPath(posixPath)) {
 			return false;
 		}
 
-		// 3. Check minified patterns
-		Path fileNamePath = Path.of(fileName);
-		Path fileNameLowerPath = Path.of(fileNameLower);
-		for (PathMatcher matcher : minifiedPathMatchers) {
-			if (matcher.matches(fileNamePath)
-					|| matcher.matches(fileNameLowerPath)
-					|| (relativePath != null && matcher.matches(relativePath))) {
-				return false;
-			}
-		}
+		String fileName = filePath.getFileName() != null ? filePath.getFileName().toString() : "";
 
 		// 4. Check allowed file extensions
 		String extension = LanguageDetector.extractExtension(fileName).toLowerCase(Locale.ROOT);

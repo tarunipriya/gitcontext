@@ -37,14 +37,17 @@ public class CommitIngestor {
 	private static final Logger log = LoggerFactory.getLogger(CommitIngestor.class);
 
 	private final GitContextProperties properties;
+	private final FileFilter fileFilter;
 
 	/**
 	 * Creates a new {@link CommitIngestor}.
 	 *
 	 * @param properties GitContext configuration properties
+	 * @param fileFilter candidate file and path filter
 	 */
-	public CommitIngestor(GitContextProperties properties) {
+	public CommitIngestor(GitContextProperties properties, FileFilter fileFilter) {
 		this.properties = Objects.requireNonNull(properties, "properties must not be null");
+		this.fileFilter = Objects.requireNonNull(fileFilter, "fileFilter must not be null");
 	}
 
 	/**
@@ -86,6 +89,7 @@ public class CommitIngestor {
 
 					SizeLimitedOutputStream diffOut = new SizeLimitedOutputStream(maxDiffChars);
 					List<String> filesChangedList = new ArrayList<>();
+					int totalDiffsCount = 0;
 
 					try (DiffFormatter diffFormatter = new DiffFormatter(diffOut)) {
 						diffFormatter.setRepository(repository);
@@ -100,11 +104,16 @@ public class CommitIngestor {
 							diffs = diffFormatter.scan(null, commit.getTree());
 						}
 
+						totalDiffsCount = diffs.size();
 						for (DiffEntry diff : diffs) {
 							String path = diff.getChangeType() == DiffEntry.ChangeType.DELETE
 									? diff.getOldPath()
 									: diff.getNewPath();
-							filesChangedList.add("- " + diff.getChangeType().name() + " " + path.replace('\\', '/'));
+							if (path != null && fileFilter.isExcludedPath(path)) {
+								continue;
+							}
+							String normalizedPath = path != null ? path.replace('\\', '/') : "";
+							filesChangedList.add("- " + diff.getChangeType().name() + " " + normalizedPath);
 							diffFormatter.format(diff);
 						}
 					}
@@ -112,18 +121,22 @@ public class CommitIngestor {
 					StringBuilder contentBuilder = new StringBuilder();
 					contentBuilder.append(fullMessage);
 
-					if (!filesChangedList.isEmpty()) {
-						contentBuilder.append("\n\nFiles changed:\n");
-						for (String fileLine : filesChangedList) {
-							contentBuilder.append(fileLine).append("\n");
+					if (totalDiffsCount > 0 && filesChangedList.isEmpty()) {
+						contentBuilder.append("\n\n(changes limited to excluded paths)");
+					} else {
+						if (!filesChangedList.isEmpty()) {
+							contentBuilder.append("\n\nFiles changed:\n");
+							for (String fileLine : filesChangedList) {
+								contentBuilder.append(fileLine).append("\n");
+							}
 						}
-					}
 
-					String diffString = diffOut.toString(StandardCharsets.UTF_8).trim();
-					if (!diffString.isEmpty()) {
-						contentBuilder.append("\n\n").append(diffString);
-						if (diffOut.isTruncated()) {
-							contentBuilder.append("\n[diff truncated]");
+						String diffString = diffOut.toString(StandardCharsets.UTF_8).trim();
+						if (!diffString.isEmpty()) {
+							contentBuilder.append("\n\n").append(diffString);
+							if (diffOut.isTruncated()) {
+								contentBuilder.append("\n[diff truncated]");
+							}
 						}
 					}
 

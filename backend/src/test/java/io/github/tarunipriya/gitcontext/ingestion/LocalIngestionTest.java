@@ -86,7 +86,7 @@ class LocalIngestionTest {
 		repositoryCloner = new RepositoryCloner(properties);
 		fileFilter = new FileFilter(properties);
 		fileIngestor = new FileIngestor(properties, fileFilter);
-		commitIngestor = new CommitIngestor(properties);
+		commitIngestor = new CommitIngestor(properties, fileFilter);
 	}
 
 	@AfterEach
@@ -213,7 +213,7 @@ class LocalIngestionTest {
 				new GitContextProperties.IngestionProperties(512, 500, 50, null, null, null, null, null, null),
 				null
 		);
-		CommitIngestor smallDiffIngestor = new CommitIngestor(smallDiffProps);
+		CommitIngestor smallDiffIngestor = new CommitIngestor(smallDiffProps, new FileFilter(smallDiffProps));
 
 		RepoRef repoRef = new RepoRef("testowner", "testrepo");
 		ClonedRepo cloned = repositoryCloner.cloneOrUpdate(repoRef, sourceRepoDir.toUri().toString());
