@@ -3,6 +3,8 @@ package io.github.tarunipriya.gitcontext.indexing.qdrant;
 import io.github.tarunipriya.gitcontext.config.GitContextProperties;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantCollectionInfo;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantCountResponse;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantScrollPoint;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantScrollResponse;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantSearchResponse;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.dto.QdrantSearchResultItem;
 import java.util.ArrayList;
@@ -272,6 +274,83 @@ public class QdrantClient {
 			return response.result().count();
 		}
 		return 0;
+	}
+
+	/**
+	 * Pages through all matching points in the collection using Qdrant's {@code /points/scroll} endpoint.
+	 *
+	 * <p>Transfers only the {@code embedHash} payload field by default to minimize bandwidth.
+	 *
+	 * @param collectionName name of the collection
+	 * @param filter optional payload filter map (or null for all points)
+	 * @param withVector whether to include dense embedding vectors in the response
+	 * @param pageSize number of points retrieved per page request
+	 * @return complete list of matching points across all pages
+	 */
+	public List<QdrantPoint> scroll(String collectionName, Map<String, Object> filter, boolean withVector, int pageSize) {
+		return scroll(collectionName, filter, List.of("embedHash"), withVector, pageSize);
+	}
+
+	/**
+	 * Pages through all matching points in the collection using Qdrant's {@code /points/scroll} endpoint with specific payload fields.
+	 *
+	 * @param collectionName name of the collection
+	 * @param filter optional payload filter map (or null for all points)
+	 * @param payloadFields list of specific payload keys to return (null for all, empty for none)
+	 * @param withVector whether to include dense embedding vectors in the response
+	 * @param pageSize number of points retrieved per page request
+	 * @return complete list of matching points across all pages
+	 */
+	public List<QdrantPoint> scroll(String collectionName, Map<String, Object> filter, List<String> payloadFields, boolean withVector, int pageSize) {
+		Objects.requireNonNull(collectionName, "collectionName must not be null");
+		int limit = pageSize > 0 ? pageSize : defaultUpsertBatchSize;
+
+		List<QdrantPoint> allPoints = new ArrayList<>();
+		Object offset = null;
+
+		while (true) {
+			Map<String, Object> req = new LinkedHashMap<>();
+			if (filter != null && !filter.isEmpty()) {
+				req.put("filter", filter);
+			}
+			req.put("limit", limit);
+			if (offset != null) {
+				req.put("offset", offset);
+			}
+			if (payloadFields != null && !payloadFields.isEmpty()) {
+				req.put("with_payload", payloadFields);
+			} else if (payloadFields == null) {
+				req.put("with_payload", true);
+			} else {
+				req.put("with_payload", false);
+			}
+			req.put("with_vector", withVector);
+
+			QdrantScrollResponse response = execute(() -> restClient.post()
+					.uri("/collections/{name}/points/scroll", collectionName)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(req)
+					.retrieve()
+					.body(QdrantScrollResponse.class));
+
+			if (response == null || response.result() == null || response.result().points() == null) {
+				break;
+			}
+
+			List<QdrantScrollPoint> points = response.result().points();
+			for (QdrantScrollPoint sp : points) {
+				String pointId = sp.id() != null ? sp.id().toString() : null;
+				allPoints.add(new QdrantPoint(pointId, sp.vector(), sp.payload() != null ? sp.payload() : Map.of()));
+			}
+
+			Object nextOffset = response.result().nextPageOffset();
+			if (nextOffset == null || points.isEmpty() || Objects.equals(nextOffset, offset)) {
+				break;
+			}
+			offset = nextOffset;
+		}
+
+		return allPoints;
 	}
 
 	/**

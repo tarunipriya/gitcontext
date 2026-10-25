@@ -23,12 +23,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantException;
 
 @ExtendWith(MockitoExtension.class)
 class VectorStoreTest {
@@ -64,9 +67,10 @@ class VectorStoreTest {
 	@DisplayName("index coordinates ensureCollection, embedding, point mapping, and upsert")
 	void testIndexCoordinatesFlow() {
 		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
 		when(embeddingService.embedDocuments(List.of("text 1"))).thenReturn(List.of(new float[]{0.1f}));
 		QdrantPoint point = new QdrantPoint("uuid-1", new float[]{0.1f}, Map.of("repo", "testowner/testrepo"));
-		when(chunkPointMapper.toPoint(any(), any(), any(), any())).thenReturn(point);
+		when(chunkPointMapper.toPoint(any(), any(), any(), any(), any())).thenReturn(point);
 
 		ChunkMetadata meta = new ChunkMetadata("testowner/testrepo", SourceType.CODE, "path.java", "java", null, null, null, null, ChunkType.METHOD, null, null, null, 1, 10, 20);
 		Chunk chunk = new Chunk("doc-1", 0, "text 1", "raw 1", meta);
@@ -76,6 +80,235 @@ class VectorStoreTest {
 		assertThat(summary.count()).isEqualTo(1);
 		verify(qdrantClient).ensureCollection("gitcontext_chunks", 384);
 		verify(qdrantClient).upsert(eq("gitcontext_chunks"), eq(List.of(point)), eq(128));
+	}
+
+	@Test
+	@DisplayName("incremental re-index reuses unchanged chunks and calls EmbeddingService with 0 texts")
+	void testIncrementalReindexUnchangedChunksReused() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-1", 0, "unchanged text");
+		String pointId = ChunkPointMapper.chunkIdToUuid(chunk.id());
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", chunk.text());
+		float[] existingVector = new float[384];
+		existingVector[0] = 0.42f;
+
+		QdrantPoint existingPoint = new QdrantPoint(pointId, existingVector, Map.of("embedHash", hash));
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt())).thenReturn(List.of(existingPoint));
+
+		QdrantPoint upsertPoint = new QdrantPoint(pointId, existingVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(existingVector), eq(repo), eq("run-200"), eq(hash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(0);
+		assertThat(summary.reusedChunks()).isEqualTo(1);
+		verify(embeddingService).embedDocuments(List.of());
+		verify(qdrantClient).upsert(eq("gitcontext_chunks"), eq(List.of(upsertPoint)), anyInt());
+	}
+
+	@Test
+	@DisplayName("incremental re-index re-embeds changed chunk text")
+	void testIncrementalReindexChangedTextReembedded() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-1", 0, "new changed text");
+		String pointId = ChunkPointMapper.chunkIdToUuid(chunk.id());
+		String oldHash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "old text");
+		float[] oldVector = new float[384];
+
+		QdrantPoint existingPoint = new QdrantPoint(pointId, oldVector, Map.of("embedHash", oldHash));
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt())).thenReturn(List.of(existingPoint));
+
+		float[] newVector = new float[384];
+		newVector[0] = 0.99f;
+		when(embeddingService.embedDocuments(List.of("new changed text"))).thenReturn(List.of(newVector));
+
+		String newHash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "new changed text");
+		QdrantPoint upsertPoint = new QdrantPoint(pointId, newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(newHash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("new changed text"));
+	}
+
+	@Test
+	@DisplayName("incremental re-index embeds new chunks missing from existing index")
+	void testIncrementalReindexNewChunkEmbedded() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-2", 0, "completely new text");
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt())).thenReturn(List.of());
+
+		float[] newVector = new float[384];
+		when(embeddingService.embedDocuments(List.of("completely new text"))).thenReturn(List.of(newVector));
+
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "completely new text");
+		QdrantPoint upsertPoint = new QdrantPoint("uuid-new", newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(hash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("completely new text"));
+	}
+
+	@Test
+	@DisplayName("incremental re-index re-embeds when embedding model ID differs")
+	void testIncrementalReindexDifferentModelIdForcesReembed() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("new-model-v2");
+
+		Chunk chunk = createChunk("doc-1", 0, "some code text");
+		String pointId = ChunkPointMapper.chunkIdToUuid(chunk.id());
+		String oldModelHash = ChunkPointMapper.computeEmbedHash("old-model-v1", "some code text");
+		float[] oldVector = new float[384];
+
+		QdrantPoint existingPoint = new QdrantPoint(pointId, oldVector, Map.of("embedHash", oldModelHash));
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt())).thenReturn(List.of(existingPoint));
+
+		float[] newVector = new float[384];
+		when(embeddingService.embedDocuments(List.of("some code text"))).thenReturn(List.of(newVector));
+
+		String newModelHash = ChunkPointMapper.computeEmbedHash("new-model-v2", "some code text");
+		QdrantPoint upsertPoint = new QdrantPoint(pointId, newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(newModelHash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("some code text"));
+	}
+
+	@Test
+	@DisplayName("incremental re-index re-embeds when existing vector dimension does not match")
+	void testIncrementalReindexWrongVectorDimensionForcesReembed() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-1", 0, "some code text");
+		String pointId = ChunkPointMapper.chunkIdToUuid(chunk.id());
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "some code text");
+		float[] wrongDimVector = new float[128]; // Dimension mismatch: 128 vs 384
+
+		QdrantPoint existingPoint = new QdrantPoint(pointId, wrongDimVector, Map.of("embedHash", hash));
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt())).thenReturn(List.of(existingPoint));
+
+		float[] newVector = new float[384];
+		when(embeddingService.embedDocuments(List.of("some code text"))).thenReturn(List.of(newVector));
+
+		QdrantPoint upsertPoint = new QdrantPoint(pointId, newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(hash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("some code text"));
+	}
+
+	@Test
+	@DisplayName("incremental re-index logs warning and falls back to full embedding when scroll fails")
+	void testIncrementalReindexScrollFailureFallsBackToFullEmbedding() {
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-1", 0, "some code text");
+		when(qdrantClient.scroll(eq("gitcontext_chunks"), any(), eq(true), anyInt()))
+				.thenThrow(new QdrantException("Scroll timeout", null));
+
+		float[] newVector = new float[384];
+		when(embeddingService.embedDocuments(List.of("some code text"))).thenReturn(List.of(newVector));
+
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "some code text");
+		QdrantPoint upsertPoint = new QdrantPoint("uuid-1", newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(hash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = vectorStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("some code text"));
+		verify(qdrantClient).upsert(eq("gitcontext_chunks"), eq(List.of(upsertPoint)), anyInt());
+	}
+
+	@Test
+	@DisplayName("incremental re-index disabled by property performs full embedding without scroll")
+	void testIncrementalReindexDisabledPerformsFullEmbedding() {
+		GitContextProperties disabledProps = new GitContextProperties(
+				null,
+				Path.of("./data/repos"),
+				"http://localhost:6333",
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				new GitContextProperties.IndexingProperties(false)
+		);
+		VectorStore customStore = new VectorStore(qdrantClient, embeddingService, chunkPointMapper, disabledProps);
+
+		when(embeddingService.dimension()).thenReturn(384);
+		when(embeddingService.modelId()).thenReturn("bge-small-en-v1.5-q");
+
+		Chunk chunk = createChunk("doc-1", 0, "some code text");
+		float[] newVector = new float[384];
+		when(embeddingService.embedDocuments(List.of("some code text"))).thenReturn(List.of(newVector));
+
+		String hash = ChunkPointMapper.computeEmbedHash("bge-small-en-v1.5-q", "some code text");
+		QdrantPoint upsertPoint = new QdrantPoint("uuid-1", newVector, Map.of("repo", repo.normalizedKey()));
+		when(chunkPointMapper.toPoint(eq(chunk), eq(newVector), eq(repo), eq("run-200"), eq(hash))).thenReturn(upsertPoint);
+
+		IndexSummary summary = customStore.index(repo, "run-200", List.of(chunk));
+
+		assertThat(summary.count()).isEqualTo(1);
+		assertThat(summary.embeddedChunks()).isEqualTo(1);
+		assertThat(summary.reusedChunks()).isEqualTo(0);
+		verify(embeddingService).embedDocuments(List.of("some code text"));
+		verify(qdrantClient, never()).scroll(any(), any(), anyBoolean(), anyInt());
+	}
+
+	private Chunk createChunk(String docId, int index, String text) {
+		ChunkMetadata meta = new ChunkMetadata(
+				repo.normalizedKey(),
+				SourceType.CODE,
+				"path.java",
+				"java",
+				null,
+				null,
+				null,
+				null,
+				ChunkType.METHOD,
+				null,
+				null,
+				null,
+				1,
+				10,
+				20
+		);
+		return new Chunk(docId, index, text, text, meta);
 	}
 
 	@Test

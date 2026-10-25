@@ -15,6 +15,13 @@ public interface EmbeddingService {
 	int dimension();
 
 	/**
+	 * Returns a stable identifier for the embedding model (e.g. "bge-small-en-v1.5-q").
+	 *
+	 * @return stable model identifier string
+	 */
+	String modelId();
+
+	/**
 	 * Embeds a list of document texts into dense vector representations.
 	 *
 	 * <p>Document texts are embedded without query instruction prefixes.

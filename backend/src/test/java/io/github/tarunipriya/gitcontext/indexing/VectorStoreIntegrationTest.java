@@ -91,6 +91,8 @@ class VectorStoreIntegrationTest {
 		// 1. Index run-1
 		IndexSummary summary1 = vectorStore.index(testRepo, "run-1", List.of(rateLimitChunk, markdownChunk, cloneChunk));
 		assertThat(summary1.count()).isEqualTo(3);
+		assertThat(summary1.embeddedChunks()).isEqualTo(3);
+		assertThat(summary1.reusedChunks()).isEqualTo(0);
 		assertThat(summary1.embedMillis()).isGreaterThanOrEqualTo(0);
 		assertThat(summary1.upsertMillis()).isGreaterThanOrEqualTo(0);
 
@@ -153,6 +155,8 @@ class VectorStoreIntegrationTest {
 		// 3. Index run-2 with fewer chunks and prune stale run-1 points
 		IndexSummary summary2 = vectorStore.index(testRepo, "run-2", List.of(rateLimitChunk, markdownChunk));
 		assertThat(summary2.count()).isEqualTo(2);
+		assertThat(summary2.embeddedChunks()).isEqualTo(0);
+		assertThat(summary2.reusedChunks()).isEqualTo(2);
 
 		vectorStore.deleteStale(testRepo, "run-2");
 
@@ -167,6 +171,109 @@ class VectorStoreIntegrationTest {
 		assertThat(vectorStore.countRepoPoints(testRepo)).isEqualTo(2);
 	}
 
+	@Test
+	@DisplayName("incremental re-indexing reuses unchanged embeddings, re-embeds changed chunk, and removes deleted points")
+	void testIncrementalReindexingWorkflow() {
+		RepoRef repo = RepoRef.parse("testowner/incremental-test");
+
+		Chunk chunk1 = createChunkForRepo(
+				repo,
+				"doc-1",
+				0,
+				"src/main/java/ServiceA.java",
+				"doWork",
+				ChunkType.METHOD,
+				"Service A processes background ingestion events reliably.",
+				1,
+				20
+		);
+
+		Chunk chunk2 = createChunkForRepo(
+				repo,
+				"doc-2",
+				0,
+				"src/main/java/ServiceB.java",
+				"sendNotification",
+				ChunkType.METHOD,
+				"Service B sends alert notifications to administrators.",
+				10,
+				30
+		);
+
+		Chunk chunk3 = createChunkForRepo(
+				repo,
+				"doc-3",
+				0,
+				"src/main/java/ServiceC.java",
+				"cleanup",
+				ChunkType.METHOD,
+				"Service C purges temporary cache files periodically.",
+				5,
+				15
+		);
+
+		// 1. Initial indexing with run-1
+		IndexSummary initialSummary = vectorStore.index(repo, "run-1", List.of(chunk1, chunk2, chunk3));
+		assertThat(initialSummary.count()).isEqualTo(3);
+		assertThat(initialSummary.embeddedChunks()).isEqualTo(3);
+		assertThat(initialSummary.reusedChunks()).isEqualTo(0);
+
+		List<SearchHit> initialHits = vectorStore.search(repo, "background ingestion events", 3, null, null);
+		assertThat(initialHits).isNotEmpty();
+		assertThat(initialHits.get(0).symbolName()).isEqualTo("doWork");
+
+		// 2. Re-index the exact same chunks with run-2
+		IndexSummary reindexSummary = vectorStore.index(repo, "run-2", List.of(chunk1, chunk2, chunk3));
+		assertThat(reindexSummary.count()).isEqualTo(3);
+		assertThat(reindexSummary.embeddedChunks()).isEqualTo(0);
+		assertThat(reindexSummary.reusedChunks()).isEqualTo(3);
+
+		// Verify search results are completely identical
+		List<SearchHit> reindexHits = vectorStore.search(repo, "background ingestion events", 3, null, null);
+		assertThat(reindexHits).hasSize(initialHits.size());
+		for (int i = 0; i < initialHits.size(); i++) {
+			assertThat(reindexHits.get(i).id()).isEqualTo(initialHits.get(i).id());
+			assertThat(reindexHits.get(i).symbolName()).isEqualTo(initialHits.get(i).symbolName());
+			assertThat(reindexHits.get(i).path()).isEqualTo(initialHits.get(i).path());
+			assertThat(reindexHits.get(i).score()).isEqualTo(initialHits.get(i).score());
+		}
+
+		// 3. Change one chunk's text -> embeddedChunks == 1
+		Chunk modifiedChunk1 = createChunkForRepo(
+				repo,
+				"doc-1",
+				0,
+				"src/main/java/ServiceA.java",
+				"doWork",
+				ChunkType.METHOD,
+				"Service A processes high-throughput background ingestion events with backpressure.",
+				1,
+				25
+		);
+
+		IndexSummary changedSummary = vectorStore.index(repo, "run-3", List.of(modifiedChunk1, chunk2, chunk3));
+		assertThat(changedSummary.count()).isEqualTo(3);
+		assertThat(changedSummary.embeddedChunks()).isEqualTo(1);
+		assertThat(changedSummary.reusedChunks()).isEqualTo(2);
+
+		// 4. Remove a chunk (chunk3) and run deleteStale -> its point is gone
+		IndexSummary removedSummary = vectorStore.index(repo, "run-4", List.of(modifiedChunk1, chunk2));
+		assertThat(removedSummary.count()).isEqualTo(2);
+		assertThat(removedSummary.embeddedChunks()).isEqualTo(0);
+		assertThat(removedSummary.reusedChunks()).isEqualTo(2);
+
+		vectorStore.deleteStale(repo, "run-4");
+
+		assertThat(vectorStore.countRepoPoints(repo)).isEqualTo(2);
+
+		long removedPointCount = qdrantClient.count(properties.qdrant().collection(),
+				Map.of("must", List.of(
+						Map.of("key", "repo", "match", Map.of("value", repo.normalizedKey())),
+						Map.of("key", "chunkId", "match", Map.of("value", chunk3.id()))
+				)));
+		assertThat(removedPointCount).isEqualTo(0);
+	}
+
 	private Chunk createChunk(
 			String docId,
 			int index,
@@ -177,12 +284,26 @@ class VectorStoreIntegrationTest {
 			int startLine,
 			int endLine
 	) {
+		return createChunkForRepo(testRepo, docId, index, path, symbolName, chunkType, content, startLine, endLine);
+	}
+
+	private Chunk createChunkForRepo(
+			RepoRef repo,
+			String docId,
+			int index,
+			String path,
+			String symbolName,
+			ChunkType chunkType,
+			String content,
+			int startLine,
+			int endLine
+	) {
 		ChunkMetadata metadata = new ChunkMetadata(
-				testRepo.normalizedKey(),
+				repo.normalizedKey(),
 				SourceType.CODE,
 				path,
 				"java",
-				"https://github.com/" + testRepo.fullName() + "/blob/main/" + path,
+				"https://github.com/" + repo.fullName() + "/blob/main/" + path,
 				"commit123",
 				"author",
 				null,

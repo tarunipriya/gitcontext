@@ -168,4 +168,88 @@ class QdrantClientTest {
 				.hasMessageContaining("http://127.0.0.1:65534")
 				.hasMessageContaining("docker compose up -d");
 	}
+
+	@Test
+	@DisplayName("scroll pages through all matching points across multiple pages using next_page_offset")
+	void testScrollPagingMultiplePages() {
+		String page1Json = """
+				{
+				  "result": {
+				    "points": [
+				      {
+				        "id": "11111111-1111-1111-1111-111111111111",
+				        "payload": {
+				          "embedHash": "hash1"
+				        },
+				        "vector": [0.1, 0.2]
+				      },
+				      {
+				        "id": "22222222-2222-2222-2222-222222222222",
+				        "payload": {
+				          "embedHash": "hash2"
+				        },
+				        "vector": [0.3, 0.4]
+				      }
+				    ],
+				    "next_page_offset": "cursor-page-2"
+				  },
+				  "status": "ok"
+				}
+				""";
+
+		String page2Json = """
+				{
+				  "result": {
+				    "points": [
+				      {
+				        "id": "33333333-3333-3333-3333-333333333333",
+				        "payload": {
+				          "embedHash": "hash3"
+				        },
+				        "vector": [0.5, 0.6]
+				      }
+				    ],
+				    "next_page_offset": null
+				  },
+				  "status": "ok"
+				}
+				""";
+
+		// Expect first page call
+		mockServer.expect(requestTo("http://localhost:6333/collections/test_collection/points/scroll"))
+				.andExpect(method(HttpMethod.POST))
+				.andExpect(content().string(org.hamcrest.Matchers.containsString("\"limit\":2")))
+				.andExpect(content().string(org.hamcrest.Matchers.containsString("\"with_vector\":true")))
+				.andExpect(content().string(org.hamcrest.Matchers.containsString("\"with_payload\":[\"embedHash\"]")))
+				.andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"offset\""))))
+				.andRespond(withSuccess(page1Json, MediaType.APPLICATION_JSON));
+
+		// Expect second page call with offset
+		mockServer.expect(requestTo("http://localhost:6333/collections/test_collection/points/scroll"))
+				.andExpect(method(HttpMethod.POST))
+				.andExpect(content().string(org.hamcrest.Matchers.containsString("\"limit\":2")))
+				.andExpect(content().string(org.hamcrest.Matchers.containsString("\"offset\":\"cursor-page-2\"")))
+				.andRespond(withSuccess(page2Json, MediaType.APPLICATION_JSON));
+
+		Map<String, Object> filter = Map.of(
+				"must", List.of(Map.of("key", "repo", "match", Map.of("value", "testowner/testrepo")))
+		);
+
+		List<QdrantPoint> points = client.scroll("test_collection", filter, true, 2);
+
+		assertThat(points).hasSize(3);
+		assertThat(points.get(0).id()).isEqualTo("11111111-1111-1111-1111-111111111111");
+		assertThat(points.get(0).payload()).containsEntry("embedHash", "hash1");
+		assertThat(points.get(0).vector()).containsExactly(0.1f, 0.2f);
+
+		assertThat(points.get(1).id()).isEqualTo("22222222-2222-2222-2222-222222222222");
+		assertThat(points.get(1).payload()).containsEntry("embedHash", "hash2");
+		assertThat(points.get(1).vector()).containsExactly(0.3f, 0.4f);
+
+		assertThat(points.get(2).id()).isEqualTo("33333333-3333-3333-3333-333333333333");
+		assertThat(points.get(2).payload()).containsEntry("embedHash", "hash3");
+		assertThat(points.get(2).vector()).containsExactly(0.5f, 0.6f);
+
+		mockServer.verify();
+	}
 }

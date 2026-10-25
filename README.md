@@ -66,6 +66,15 @@ docker compose up -d
 docker compose down
 ```
 
+## Incremental Re-indexing
+
+GitContext reuses embeddings of unchanged chunks during repository updates to drastically reduce re-indexing time (e.g. from ~150 s down to a few seconds):
+
+- **Content Hash Matching**: For every chunk, GitContext computes a deterministic SHA-256 hash `embedHash = sha256(modelId + "\n" + chunk.text)` stored in the Qdrant point payload.
+- **Scroll & Cache Reuse**: On re-indexing, `VectorStore` scrolls existing repository points via Qdrant's `/points/scroll` API, transferring only necessary payload fields and cached vectors. Any chunk with a matching `embedHash` and valid vector dimension reuses its existing vector without invoking the embedding model.
+- **Identical Index & Search Results**: All points (reused + newly embedded) are upserted with the current `runId`, and stale entries from older indexing runs or deleted files are pruned via `deleteStale(repo, runId)`. Vector store contents and query retrieval results are identical to a full re-index.
+- **Configuration**: Incremental re-indexing is enabled by default via `gitcontext.indexing.reuse-embeddings=true`. Set to `false` in `application.yml` or via `--gitcontext.indexing.reuse-embeddings=false` to force full re-embedding. If scrolling Qdrant fails, GitContext logs a warning and automatically falls back to full embedding.
+
 ## Reranking
 
 GitContext supports an optional second-stage cross-encoder reranker (`ms-marco-MiniLM-L-6-v2` running locally in Java via ONNX Runtime) to rescore candidate passages retrieved by hybrid search (RRF across dense vector and sparse BM25).

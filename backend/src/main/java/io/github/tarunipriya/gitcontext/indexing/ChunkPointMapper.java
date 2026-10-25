@@ -4,6 +4,7 @@ import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantPoint;
 import io.github.tarunipriya.gitcontext.indexing.qdrant.QdrantScoredPoint;
 import io.github.tarunipriya.gitcontext.model.Chunk;
 import io.github.tarunipriya.gitcontext.model.ChunkType;
+import io.github.tarunipriya.gitcontext.model.Hashing;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
 import java.util.LinkedHashMap;
@@ -21,6 +22,19 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ChunkPointMapper {
+
+	/**
+	 * Computes the deterministic SHA-256 content hash representing the embedding model and chunk text.
+	 *
+	 * @param embeddingModelId stable model identifier
+	 * @param chunkText raw text that gets embedded
+	 * @return SHA-256 hexadecimal hash string
+	 */
+	public static String computeEmbedHash(String embeddingModelId, String chunkText) {
+		Objects.requireNonNull(embeddingModelId, "embeddingModelId must not be null");
+		Objects.requireNonNull(chunkText, "chunkText must not be null");
+		return Hashing.sha256(embeddingModelId + "\n" + chunkText);
+	}
 
 	/**
 	 * Converts a chunk identifier (typically 64-character SHA-256 hex) to a deterministic UUID
@@ -46,6 +60,27 @@ public class ChunkPointMapper {
 	}
 
 	/**
+	 * Converts an ingested {@link Chunk} and its vector embedding into a {@link QdrantPoint} with embedHash.
+	 *
+	 * @param chunk chunk data and metadata
+	 * @param vector dense embedding vector
+	 * @param repo repository reference
+	 * @param runId unique indexing run identifier
+	 * @param embedHash deterministic content hash of the embedding model and text
+	 * @return Qdrant vector point with full metadata payload
+	 */
+	public QdrantPoint toPoint(Chunk chunk, float[] vector, RepoRef repo, String runId, String embedHash) {
+		Objects.requireNonNull(chunk, "chunk must not be null");
+		Objects.requireNonNull(vector, "vector must not be null");
+		Objects.requireNonNull(repo, "repo must not be null");
+		Objects.requireNonNull(runId, "runId must not be null");
+
+		String pointId = chunkIdToUuid(chunk.id());
+		Map<String, Object> payload = toPayload(chunk, repo.normalizedKey(), runId, embedHash);
+		return new QdrantPoint(pointId, vector, payload);
+	}
+
+	/**
 	 * Converts an ingested {@link Chunk} and its vector embedding into a {@link QdrantPoint}.
 	 *
 	 * @param chunk chunk data and metadata
@@ -55,23 +90,25 @@ public class ChunkPointMapper {
 	 * @return Qdrant vector point with full metadata payload
 	 */
 	public QdrantPoint toPoint(Chunk chunk, float[] vector, RepoRef repo, String runId) {
-		Objects.requireNonNull(chunk, "chunk must not be null");
-		Objects.requireNonNull(vector, "vector must not be null");
-		Objects.requireNonNull(repo, "repo must not be null");
-		Objects.requireNonNull(runId, "runId must not be null");
-
-		String pointId = chunkIdToUuid(chunk.id());
-		Map<String, Object> payload = toPayload(chunk, repo.normalizedKey(), runId);
-		return new QdrantPoint(pointId, vector, payload);
+		return toPoint(chunk, vector, repo, runId, null);
 	}
 
 	/**
-	 * Constructs the metadata payload map for a given chunk.
+	 * Constructs the metadata payload map for a given chunk including embedHash.
+	 *
+	 * @param chunk chunk data and metadata
+	 * @param normalizedRepoKey normalized repository key
+	 * @param runId indexing run identifier
+	 * @param embedHash deterministic content hash of embedding model and text, or null
+	 * @return map of payload metadata attributes
 	 */
-	public Map<String, Object> toPayload(Chunk chunk, String normalizedRepoKey, String runId) {
+	public Map<String, Object> toPayload(Chunk chunk, String normalizedRepoKey, String runId, String embedHash) {
 		Map<String, Object> payload = new LinkedHashMap<>();
 		payload.put("repo", normalizedRepoKey);
 		payload.put("runId", runId);
+		if (embedHash != null) {
+			payload.put("embedHash", embedHash);
+		}
 		payload.put("chunkId", chunk.id());
 		payload.put("documentId", chunk.documentId());
 		payload.put("chunkIndex", chunk.chunkIndex());
@@ -111,6 +148,18 @@ public class ChunkPointMapper {
 		payload.put("content", chunk.content());
 
 		return payload;
+	}
+
+	/**
+	 * Constructs the metadata payload map for a given chunk without embedHash.
+	 *
+	 * @param chunk chunk data and metadata
+	 * @param normalizedRepoKey normalized repository key
+	 * @param runId indexing run identifier
+	 * @return map of payload metadata attributes
+	 */
+	public Map<String, Object> toPayload(Chunk chunk, String normalizedRepoKey, String runId) {
+		return toPayload(chunk, normalizedRepoKey, runId, null);
 	}
 
 	/**
