@@ -29,9 +29,9 @@ gitcontext: 32 answerable questions at commit `9fef021`; petclinic: 28 answerabl
 **What the numbers show**
 - **Hybrid is the robust choice.** Vector search is stronger on this repository, BM25 is stronger on petclinic (descriptive class names match question words), and hybrid matches or beats the best single retriever on both.
 - **A tuned fusion weight did not generalize.** Lowering the keyword weight to 0.5 raised gitcontext Recall@5 from 0.766 to 0.797 but lowered petclinic from 0.732 to 0.685, so the default stays at 1.0.
-- **The reranker is off by default.** `ms-marco-MiniLM-L-6-v2` is trained on web search, not code: it hurt petclinic (0.613 vs 0.732) and costs ~3 s per query on CPU.
+- **The reranker is off by default.** `ms-marco-MiniLM-L-6-v2` is trained on web search, not code: it hurt petclinic (0.613 vs 0.732) and costs 3–4 s per query on CPU.
 
-### Answer quality (gitcontext, 35 questions)
+### Answer quality (gitcontext, 31 of 35 questions)
 
 Answer model `gemini-3.5-flash`, graded by a separate judge model `gemini-3.5-flash-lite` at temperature 0, commit `863d682`.
 
