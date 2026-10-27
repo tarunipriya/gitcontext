@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { askRepo, ApiError, type AskResponse, type ProblemDetail, type SourceResponse } from '../api/client';
 import { remarkCitations } from '../utils/remarkCitations';
 import { safeHttpUrl } from '../utils/safeUrl';
+import { formatSourceTitle } from '../utils/formatters';
+import { AppHeader } from './AppHeader';
 import './AskPage.css';
 
 const STORAGE_KEY = 'gitcontext:last_repo';
@@ -31,12 +33,23 @@ function formatLineRange(start?: number | null, end?: number | null): string | n
   return `L${start}-${end}`;
 }
 
-export const AskPage: React.FC = () => {
-  const [repo, setRepo] = useState<string>(getInitialRepo);
+export interface AskPageProps {
+  initialRepo?: string;
+}
+
+export const AskPage: React.FC<AskPageProps> = ({ initialRepo }) => {
+  const [repo, setRepo] = useState<string>(() => initialRepo || getInitialRepo());
   const [question, setQuestion] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<ProblemDetail | null>(null);
   const [response, setResponse] = useState<AskResponse | null>(null);
+
+  useEffect(() => {
+    if (initialRepo && initialRepo.trim().length > 0) {
+      setRepo(initialRepo.trim());
+      persistRepo(initialRepo.trim());
+    }
+  }, [initialRepo]);
 
   const handleRepoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -112,20 +125,7 @@ export const AskPage: React.FC = () => {
 
   return (
     <div className="ask-container">
-      <header className="ask-header">
-        <div className="brand">
-          <div className="brand-logo" aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-              <path d="M9 18c-4.51 2-5-2-7-2" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="brand-title">GitContext</h1>
-            <p className="brand-subtitle">Grounded repository question answering with verified citations</p>
-          </div>
-        </div>
-      </header>
+      <AppHeader currentTab="ask" />
 
       <main className="ask-main">
         <form className="ask-form" onSubmit={handleSubmit} noValidate>
@@ -270,14 +270,15 @@ export const AskPage: React.FC = () => {
                 </div>
                 <ol className="sources-list">
                   {response.sources.map((source: SourceResponse) => {
+                    const displayTitle = formatSourceTitle(source);
                     const lineStr = formatLineRange(source.startLine, source.endLine);
                     const safeSourceUrl = safeHttpUrl(source.url);
                     return (
                       <li key={source.number} className={`source-item ${source.cited ? 'is-cited' : ''}`}>
                         <div className="source-item-header">
                           <span className="source-number">[{source.number}]</span>
-                          <span className="source-path" title={source.path}>
-                            {source.path}
+                          <span className="source-path" title={displayTitle}>
+                            {displayTitle}
                           </span>
                           {lineStr && <span className="source-lines">{lineStr}</span>}
                           {source.symbolName && (

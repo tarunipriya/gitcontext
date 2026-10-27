@@ -272,4 +272,54 @@ class AnswerControllerTest {
 				.andExpect(jsonPath("$.title").value("Rate Limit Exceeded"))
 				.andExpect(jsonPath("$.detail").value(containsString("Rate limit exceeded for Gemini API")));
 	}
+
+	@Test
+	@DisplayName("POST /api/repos/{owner}/{name}/ask includes title for non-file chunks (COMMIT, PR, ISSUE)")
+	void ask_nonFileSources_includesTitleInResponse() throws Exception {
+		when(vectorStore.countRepoPoints(eq(testRepo))).thenReturn(10L);
+		when(keywordIndex.exists(eq(testRepo))).thenReturn(true);
+
+		SearchHit commitHit = new SearchHit(
+				"id-1", 0.95, "testowner/testrepo", "run-1", "chunk-1", "doc-1", 0,
+				SourceType.COMMIT, ChunkType.COMMIT, null, null, null, null, null,
+				null, null, 20, "https://github.com/testowner/testrepo/commit/abc1234",
+				"abc1234567890", "Commit abc1234: Add search endpoint\n\nFull details",
+				"Add search endpoint\n\nFull commit message body"
+		);
+		SearchHit prHit = new SearchHit(
+				"id-2", 0.90, "testowner/testrepo", "run-1", "chunk-2", "doc-2", 0,
+				SourceType.PULL_REQUEST, ChunkType.PULL_REQUEST, null, null, null, null, null,
+				null, null, 25, "https://github.com/testowner/testrepo/pull/16",
+				null, "PR #16: Implement hybrid search\n\nDetails",
+				"# Implement hybrid search\n\nState: merged"
+		);
+
+		Source source1 = new Source(1, commitHit, true);
+		Source source2 = new Source(2, prHit, true);
+		Citation citation1 = new Citation(1, null, null, null, null, commitHit.url(), "chunk-1", "Add search endpoint");
+		Citation citation2 = new Citation(2, null, null, null, null, prHit.url(), "chunk-2", "Implement hybrid search");
+
+		AnswerResult result = new AnswerResult(
+				"Answer referring to commit [1] and PR [2].",
+				List.of(citation1, citation2),
+				List.of(source1, source2),
+				"gemini-3.8-flash",
+				100, 20, 10L, 200L, 210L, List.of()
+		);
+
+		when(answerService.ask(eq(testRepo), eq("What commits or PRs changed search?"), any())).thenReturn(result);
+
+		AskRequest request = new AskRequest("What commits or PRs changed search?", "HYBRID", true, false, 5);
+
+		mockMvc.perform(post("/api/repos/{owner}/{name}/ask", "testowner", "testrepo")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(objectMapper.writeValueAsString(request)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.sources[0].title").value("Add search endpoint"))
+				.andExpect(jsonPath("$.sources[0].chunkType").value("COMMIT"))
+				.andExpect(jsonPath("$.sources[1].title").value("Implement hybrid search"))
+				.andExpect(jsonPath("$.sources[1].chunkType").value("PULL_REQUEST"))
+				.andExpect(jsonPath("$.citations[0].title").value("Add search endpoint"))
+				.andExpect(jsonPath("$.citations[1].title").value("Implement hybrid search"));
+	}
 }

@@ -98,7 +98,8 @@ public class CitationParser {
 					hit.endLine(),
 					hit.symbolName(),
 					hit.url(),
-					hit.chunkId()
+					hit.chunkId(),
+					hit.extractTitle()
 			));
 		}
 

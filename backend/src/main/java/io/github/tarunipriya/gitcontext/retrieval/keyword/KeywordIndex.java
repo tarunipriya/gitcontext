@@ -14,6 +14,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -24,6 +25,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StoredField;
@@ -240,6 +242,93 @@ public class KeywordIndex implements AutoCloseable {
 		String owner = repo.owner().toLowerCase(Locale.ROOT);
 		String name = repo.name().toLowerCase(Locale.ROOT);
 		return properties.keyword().indexDir().resolve(owner).resolve(name);
+	}
+
+	/**
+	 * Lists all repositories that have an existing Lucene keyword index on disk under {@code properties.keyword().indexDir()}.
+	 *
+	 * @return sorted list of repository references
+	 */
+	public List<RepoRef> listIndexedRepos() {
+		Path base = properties.keyword().indexDir();
+		if (base == null || !Files.isDirectory(base)) {
+			return List.of();
+		}
+		List<RepoRef> repos = new ArrayList<>();
+		try (Stream<Path> owners = Files.list(base)) {
+			for (Path ownerDir : owners.filter(Files::isDirectory).toList()) {
+				String owner = ownerDir.getFileName().toString();
+				try (Stream<Path> names = Files.list(ownerDir)) {
+					for (Path nameDir : names.filter(Files::isDirectory).toList()) {
+						String name = nameDir.getFileName().toString();
+						if (name.contains("-tmp-")) {
+							continue;
+						}
+						try (FSDirectory dir = FSDirectory.open(nameDir)) {
+							if (DirectoryReader.indexExists(dir)) {
+								repos.add(new RepoRef(owner, name));
+							}
+						} catch (IOException ignored) {
+							// skip directories that are not valid Lucene indexes
+						}
+					}
+				} catch (IOException ignored) {
+					// skip unreadable owner dir
+				}
+			}
+		} catch (IOException e) {
+			log.warn("Failed to list keyword index directories under {}: {}", base, e.getMessage());
+		}
+		repos.sort(Comparator.comparing(RepoRef::fullName));
+		return repos;
+	}
+
+	/**
+	 * Returns the total number of indexed documents for the specified repository.
+	 *
+	 * @param repo repository identifier reference
+	 * @return document count, or 0 if repository does not exist or index is invalid
+	 */
+	public int getDocumentCount(RepoRef repo) {
+		if (repo == null) {
+			return 0;
+		}
+		Path repoDir = getRepoDir(repo);
+		if (!Files.isDirectory(repoDir)) {
+			return 0;
+		}
+		try (FSDirectory dir = FSDirectory.open(repoDir)) {
+			if (!DirectoryReader.indexExists(dir)) {
+				return 0;
+			}
+			try (DirectoryReader reader = DirectoryReader.open(dir)) {
+				return reader.numDocs();
+			}
+		} catch (IOException e) {
+			log.warn("Could not read document count for {}: {}", repo.fullName(), e.getMessage());
+			return 0;
+		}
+	}
+
+	/**
+	 * Returns the last modified timestamp of the repository index directory.
+	 *
+	 * @param repo repository identifier reference
+	 * @return last modified instant, or null if repository directory does not exist
+	 */
+	public Instant getLastModified(RepoRef repo) {
+		if (repo == null) {
+			return null;
+		}
+		Path repoDir = getRepoDir(repo);
+		try {
+			if (Files.isDirectory(repoDir)) {
+				return Files.getLastModifiedTime(repoDir).toInstant();
+			}
+		} catch (IOException e) {
+			log.debug("Could not read last modified time for {}: {}", repo.fullName(), e.getMessage());
+		}
+		return null;
 	}
 
 	@Override

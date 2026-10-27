@@ -4,9 +4,12 @@ import io.github.tarunipriya.gitcontext.ingestion.IngestionJob;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionJobService;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -23,9 +26,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class IngestionController {
 
 	private final IngestionJobService ingestionJobService;
+	private final KeywordIndex keywordIndex;
 
-	public IngestionController(IngestionJobService ingestionJobService) {
+	public IngestionController(IngestionJobService ingestionJobService, KeywordIndex keywordIndex) {
 		this.ingestionJobService = Objects.requireNonNull(ingestionJobService, "ingestionJobService must not be null");
+		this.keywordIndex = Objects.requireNonNull(keywordIndex, "keywordIndex must not be null");
 	}
 
 	/**
@@ -84,5 +89,36 @@ public class IngestionController {
 		IngestionResult result = ingestionJobService.getLatestResult(repo)
 				.orElseThrow(() -> new RepoNotFoundException(repo.fullName()));
 		return ResponseEntity.ok(RepoSummaryResponse.from(result));
+	}
+
+	/**
+	 * Returns summary statistics for all indexed repositories found in the keyword index directory.
+	 *
+	 * @return list of repository summaries ordered by repository name
+	 */
+	@GetMapping("/api/repos")
+	public ResponseEntity<List<RepoSummaryResponse>> listRepos() {
+		List<RepoRef> repos = keywordIndex.listIndexedRepos();
+		List<RepoSummaryResponse> summaries = new ArrayList<>();
+		for (RepoRef repo : repos) {
+			RepoSummaryResponse summary = ingestionJobService.getLatestResult(repo)
+					.map(RepoSummaryResponse::from)
+					.orElseGet(() -> new RepoSummaryResponse(
+							repo.fullName(),
+							null,
+							Map.of(),
+							keywordIndex.getDocumentCount(repo),
+							Map.of(),
+							0.0,
+							0,
+							keywordIndex.getDocumentCount(repo),
+							0L,
+							0L,
+							keywordIndex.getLastModified(repo),
+							List.of()
+					));
+			summaries.add(summary);
+		}
+		return ResponseEntity.ok(summaries);
 	}
 }

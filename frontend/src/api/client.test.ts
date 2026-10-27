@@ -5,6 +5,7 @@ import {
   getJob,
   getRecentJobs,
   getRepoSummary,
+  getRepos,
   ApiError,
   type AskResponse,
   type JobResponse,
@@ -215,6 +216,42 @@ describe('API Client', () => {
         expect.objectContaining({ headers: { Accept: 'application/json' } })
       );
       expect(res).toEqual(mockSummary);
+    });
+  });
+
+  describe('getRepos', () => {
+    it('fetches /api/repos and returns array of repo summaries', async () => {
+      const mockRepos: RepoSummaryResponse[] = [
+        {
+          repo: 'tarunipriya/gitcontext',
+          headCommitSha: 'def5678',
+          countsBySourceType: { CODE: 100 },
+          totalChunks: 250,
+          chunkCountsByType: { METHOD: 200 },
+          avgChunkTokens: 180,
+          maxChunkTokens: 600,
+          indexedPoints: 250,
+          embedMillis: 800,
+          upsertMillis: 200,
+          ingestedAt: '2026-10-27T10:00:00Z',
+        },
+      ];
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(mockRepos), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )
+      );
+
+      const res = await getRepos();
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/repos',
+        expect.objectContaining({ headers: { Accept: 'application/json' } })
+      );
+      expect(res).toEqual(mockRepos);
     });
   });
 });
