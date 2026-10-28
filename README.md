@@ -131,7 +131,13 @@ $response.citations | Format-Table number, path, startLine, endLine, url
 
 ## Web UI
 
-GitContext includes a React + TypeScript web frontend in `frontend/` featuring the Ask interface with grounded markdown answers, clickable verified citations, a retrieved sources panel, and latency telemetry.
+GitContext includes a React + TypeScript web frontend in `frontend/` with two core views switched by accessible URL hash navigation (`#/ask` and `#/repos`):
+
+- **Ask Page (`#/ask`)**: Grounded natural-language repository question answering with rich markdown rendering, inline verified citations linking to GitHub lines, retrieved sources inspector with readable titles for code files, commits (`commit <sha> — <message>`), PRs (`PR #<number> — <title>`), and issues, plus latency telemetry (retrieval, generation, tokens).
+- **Repositories Page (`#/repos`)**:
+  - Ingest GitHub repositories by entering `owner/name` or full URL.
+  - Live progress monitoring for active ingestion jobs (`QUEUED`, `RUNNING`) with automatic 2-second polling, elapsed duration timer, and error display for failed jobs.
+  - Browse indexed repositories with chunk and file counts, relative indexing timestamps, commit SHAs, and a direct "Ask" button that opens `#/ask` with the selected repository pre-filled.
 
 ### Running on Windows
 
@@ -151,7 +157,7 @@ GitContext includes a React + TypeScript web frontend in `frontend/` featuring t
    npm run dev
    ```
 4. **Open in browser**:
-   Navigate to [http://localhost:5173](http://localhost:5173).
+   Navigate to [http://localhost:5173](http://localhost:5173) (defaults to `#/ask`, or switch to `#/repos`).
 
 ## Evaluation
 

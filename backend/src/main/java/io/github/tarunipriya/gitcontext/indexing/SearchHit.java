@@ -51,4 +51,71 @@ public record SearchHit(
 		String text,
 		String content
 ) {
+
+	/**
+	 * Extracts a readable title from this search hit's metadata or content.
+	 *
+	 * @return extracted title, or null if not applicable
+	 */
+	public String extractTitle() {
+		if (sourceType == SourceType.COMMIT || chunkType == ChunkType.COMMIT) {
+			if (content != null && !content.isBlank()) {
+				return content.lines()
+						.map(String::trim)
+						.filter(line -> !line.isEmpty())
+						.findFirst()
+						.orElse(null);
+			}
+			if (text != null) {
+				String firstLine = text.lines().findFirst().orElse("");
+				int colonIdx = firstLine.indexOf(": ");
+				if (colonIdx >= 0 && firstLine.startsWith("Commit ")) {
+					return firstLine.substring(colonIdx + 2).trim();
+				}
+			}
+			return null;
+		}
+
+		if (sourceType == SourceType.PULL_REQUEST || chunkType == ChunkType.PULL_REQUEST) {
+			if (content != null && !content.isBlank()) {
+				String firstLine = content.lines().map(String::trim).filter(l -> !l.isEmpty()).findFirst().orElse("");
+				if (firstLine.startsWith("# ")) {
+					return firstLine.substring(2).trim();
+				}
+				return firstLine;
+			}
+			if (text != null) {
+				String firstLine = text.lines().findFirst().orElse("");
+				int colonIdx = firstLine.indexOf(": ");
+				if (colonIdx >= 0 && firstLine.startsWith("PR #")) {
+					return firstLine.substring(colonIdx + 2).trim();
+				}
+			}
+			return null;
+		}
+
+		if (sourceType == SourceType.ISSUE || chunkType == ChunkType.ISSUE) {
+			if (content != null && !content.isBlank()) {
+				String firstLine = content.lines().map(String::trim).filter(l -> !l.isEmpty()).findFirst().orElse("");
+				if (firstLine.startsWith("# ")) {
+					return firstLine.substring(2).trim();
+				}
+				return firstLine;
+			}
+			if (text != null) {
+				String firstLine = text.lines().findFirst().orElse("");
+				int colonIdx = firstLine.indexOf(": ");
+				if (colonIdx >= 0 && firstLine.startsWith("Issue #")) {
+					return firstLine.substring(colonIdx + 2).trim();
+				}
+			}
+			return null;
+		}
+
+		if (headingPath != null && !headingPath.isBlank()) {
+			return headingPath;
+		}
+
+		return null;
+	}
 }

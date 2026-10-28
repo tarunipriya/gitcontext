@@ -1,6 +1,7 @@
 package io.github.tarunipriya.gitcontext.api;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -9,24 +10,37 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.tarunipriya.gitcontext.config.GitContextProperties;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionJob;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionJobService;
 import io.github.tarunipriya.gitcontext.ingestion.IngestionResult;
 import io.github.tarunipriya.gitcontext.ingestion.JobStatus;
 import io.github.tarunipriya.gitcontext.model.RepoRef;
 import io.github.tarunipriya.gitcontext.model.SourceType;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.CodeAnalyzer;
+import io.github.tarunipriya.gitcontext.retrieval.keyword.KeywordIndex;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.StringField;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.store.FSDirectory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 @WebMvcTest(IngestionController.class)
 class IngestionControllerTest {
@@ -36,6 +50,9 @@ class IngestionControllerTest {
 
 	@MockitoBean
 	private IngestionJobService ingestionJobService;
+
+	@MockitoBean
+	private KeywordIndex keywordIndex;
 
 	@Test
 	@DisplayName("POST /api/ingestions returns 202 Accepted, Location header, and job body")
@@ -197,5 +214,94 @@ class IngestionControllerTest {
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.title").value("Resource Not Found"))
 				.andExpect(jsonPath("$.detail", containsString("unknown/repo")));
+	}
+
+	@Test
+	@DisplayName("GET /api/repos returns list of repository summaries with in-memory result details")
+	void listRepos_withInMemoryResults_returnsSummaries() throws Exception {
+		RepoRef repo1 = new RepoRef("owner1", "repo1");
+		RepoRef repo2 = new RepoRef("owner2", "repo2");
+		when(keywordIndex.listIndexedRepos()).thenReturn(List.of(repo1, repo2));
+
+		IngestionResult result1 = new IngestionResult(
+				repo1,
+				"abc1234",
+				List.of(),
+				Map.of(SourceType.CODE, 10),
+				List.of(),
+				Map.of(),
+				30.0,
+				50,
+				25,
+				100L,
+				50L,
+				Map.of(),
+				250L,
+				List.of()
+		);
+		when(ingestionJobService.getLatestResult(repo1)).thenReturn(Optional.of(result1));
+		when(ingestionJobService.getLatestResult(repo2)).thenReturn(Optional.empty());
+		when(keywordIndex.getDocumentCount(repo2)).thenReturn(42);
+		when(keywordIndex.getLastModified(repo2)).thenReturn(Instant.parse("2026-10-27T09:00:00Z"));
+
+		mockMvc.perform(get("/api/repos"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(2)))
+				.andExpect(jsonPath("$[0].repo").value("owner1/repo1"))
+				.andExpect(jsonPath("$[0].headCommitSha").value("abc1234"))
+				.andExpect(jsonPath("$[0].totalChunks").value(0))
+				.andExpect(jsonPath("$[0].indexedPoints").value(25))
+				.andExpect(jsonPath("$[1].repo").value("owner2/repo2"))
+				.andExpect(jsonPath("$[1].totalChunks").value(42));
+	}
+
+	@Test
+	@DisplayName("GET /api/repos returns empty list when no repos are indexed")
+	void listRepos_empty_returnsEmptyList() throws Exception {
+		when(keywordIndex.listIndexedRepos()).thenReturn(List.of());
+
+		mockMvc.perform(get("/api/repos"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(0)));
+	}
+
+	@Test
+	@DisplayName("GET /api/repos with temp index dir discovers repositories on disk via MockMvc")
+	void listRepos_withTempIndexDir_discoversReposOnDisk(@TempDir Path tempDir) throws Exception {
+		Path luceneDir = tempDir.resolve("lucene");
+		Path repo1Dir = luceneDir.resolve("testowner").resolve("myrepo");
+		Files.createDirectories(repo1Dir);
+
+		// Build a real minimal Lucene index in repo1Dir
+		CodeAnalyzer analyzer = new CodeAnalyzer();
+		try (FSDirectory dir = FSDirectory.open(repo1Dir)) {
+			IndexWriterConfig config = new IndexWriterConfig(analyzer);
+			try (IndexWriter writer = new IndexWriter(dir, config)) {
+				Document doc = new Document();
+				doc.add(new StringField("chunkId", "c1", Field.Store.YES));
+				writer.addDocument(doc);
+				writer.commit();
+			}
+		}
+
+		GitContextProperties.KeywordProperties keywordProps = new GitContextProperties.KeywordProperties(
+				luceneDir, 3.0, 1.5, 1.0
+		);
+		GitContextProperties props = new GitContextProperties(
+				null, tempDir.resolve("repos"), "http://localhost:6333",
+				null, null, null, null, null, null, keywordProps, null
+		);
+
+		KeywordIndex realKeywordIndex = new KeywordIndex(props, analyzer);
+		IngestionController controller = new IngestionController(ingestionJobService, realKeywordIndex);
+		MockMvc standaloneMockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		standaloneMockMvc.perform(get("/api/repos"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].repo").value("testowner/myrepo"))
+				.andExpect(jsonPath("$[0].totalChunks").value(1));
+
+		realKeywordIndex.close();
 	}
 }

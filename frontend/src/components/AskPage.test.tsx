@@ -464,4 +464,93 @@ describe('AskPage Component', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(/Repository must be in "owner\/name" format/i)).toBeInTheDocument();
   });
+
+  it('pre-fills repository input when initialRepo prop is provided', () => {
+    render(<AskPage initialRepo="acme/custom-project" />);
+    const repoInput = screen.getByLabelText(/repository/i) as HTMLInputElement;
+    expect(repoInput.value).toBe('acme/custom-project');
+  });
+
+  it('renders readable titles for non-file sources (commit, PR, issue)', async () => {
+    const user = userEvent.setup();
+    const nonFileSourcesResponse: AskResponse = {
+      ...mockSuccessResponse,
+      answer: 'Commit [1], PR [2], and issue [3] were consulted.',
+      citations: [
+        {
+          number: 1,
+          title: 'Add hybrid rank fusion algorithm',
+          url: 'https://github.com/tarunipriya/gitcontext/commit/a1b2c3d4e5f6',
+          chunkId: 'chunk-c1',
+        },
+        {
+          number: 2,
+          title: 'Implement tree-sitter AST chunker',
+          url: 'https://github.com/tarunipriya/gitcontext/pull/16',
+          chunkId: 'chunk-p1',
+        },
+        {
+          number: 3,
+          title: 'Fix Lucene BM25 scoring edge case',
+          url: 'https://github.com/tarunipriya/gitcontext/issues/20',
+          chunkId: 'chunk-i1',
+        },
+      ],
+      sources: [
+        {
+          number: 1,
+          chunkType: 'COMMIT',
+          commitSha: 'a1b2c3d4e5f6789',
+          title: 'Add hybrid rank fusion algorithm',
+          url: 'https://github.com/tarunipriya/gitcontext/commit/a1b2c3d4e5f6',
+          cited: true,
+          snippet: 'feat: Add hybrid rank fusion algorithm\n\nImplements RRF',
+        },
+        {
+          number: 2,
+          chunkType: 'PULL_REQUEST',
+          title: 'Implement tree-sitter AST chunker',
+          url: 'https://github.com/tarunipriya/gitcontext/pull/16',
+          cited: true,
+          snippet: 'PR description: Adds Java tree-sitter bindings',
+        },
+        {
+          number: 3,
+          chunkType: 'ISSUE',
+          title: 'Fix Lucene BM25 scoring edge case',
+          url: 'https://github.com/tarunipriya/gitcontext/issues/20',
+          cited: true,
+          snippet: 'Issue report: Zero score for empty query tokens',
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(nonFileSourcesResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+    );
+
+    render(<AskPage />);
+
+    const textarea = screen.getByLabelText(/question/i);
+    await user.type(textarea, 'What commits and PRs were involved?');
+    await user.click(screen.getByRole('button', { name: /ask gitcontext/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /retrieved sources/i })).toBeInTheDocument();
+    });
+
+    // Verify commit formatted title: "commit <sha> — <first line of message>"
+    expect(screen.getByText('commit a1b2c3d — Add hybrid rank fusion algorithm')).toBeInTheDocument();
+
+    // Verify PR formatted title: "PR #16 — <title>"
+    expect(screen.getByText('PR #16 — Implement tree-sitter AST chunker')).toBeInTheDocument();
+
+    // Verify Issue formatted title: "Issue #20 — <title>"
+    expect(screen.getByText('Issue #20 — Fix Lucene BM25 scoring edge case')).toBeInTheDocument();
+  });
 });

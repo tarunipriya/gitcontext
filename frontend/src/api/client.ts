@@ -28,12 +28,13 @@ export interface AskRequest {
  */
 export interface CitationResponse {
   number: number;
-  path: string;
+  path?: string | null;
   startLine?: number | null;
   endLine?: number | null;
   symbolName?: string | null;
   url?: string | null;
   chunkId: string;
+  title?: string | null;
 }
 
 /**
@@ -42,7 +43,7 @@ export interface CitationResponse {
  */
 export interface SourceResponse {
   number: number;
-  path: string;
+  path?: string | null;
   startLine?: number | null;
   endLine?: number | null;
   chunkType?: string | null;
@@ -50,6 +51,9 @@ export interface SourceResponse {
   url?: string | null;
   cited: boolean;
   snippet: string;
+  title?: string | null;
+  commitSha?: string | null;
+  sourceType?: string | null;
 }
 
 /**
@@ -224,4 +228,15 @@ export async function getRepoSummary(owner: string, name: string, signal?: Abort
     signal,
   });
   return handleResponse<RepoSummaryResponse>(response);
+}
+
+/**
+ * Retrieves all indexed repositories found in the keyword index directory.
+ */
+export async function getRepos(signal?: AbortSignal): Promise<RepoSummaryResponse[]> {
+  const response = await fetch('/api/repos', {
+    headers: { 'Accept': 'application/json' },
+    signal,
+  });
+  return handleResponse<RepoSummaryResponse[]>(response);
 }

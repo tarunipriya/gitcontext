@@ -286,4 +286,41 @@ class KeywordIndexTest {
 		assertThat(keywordIndex.exists(repo)).isFalse();
 		assertThat(keywordIndex.search(repo, "content", 5, null, null)).isEmpty();
 	}
+
+	@Test
+	@DisplayName("listIndexedRepos returns all valid repository indexes sorted by full name")
+	void listIndexedRepos_returnsSortedRepositories() {
+		RepoRef repoA = new RepoRef("alice", "alpha");
+		RepoRef repoB = new RepoRef("bob", "beta");
+
+		Chunk chunkA = createChunk("docA", 0, "alpha code", "alpha", ChunkType.METHOD, "Alpha.java", "testA", null);
+		Chunk chunkB = createChunk("docB", 0, "beta code", "beta", ChunkType.METHOD, "Beta.java", "testB", null);
+
+		keywordIndex.build(repoB, List.of(chunkB));
+		keywordIndex.build(repoA, List.of(chunkA));
+
+		List<RepoRef> indexed = keywordIndex.listIndexedRepos();
+		assertThat(indexed).hasSize(2);
+		assertThat(indexed.get(0).fullName()).isEqualTo("alice/alpha");
+		assertThat(indexed.get(1).fullName()).isEqualTo("bob/beta");
+
+		assertThat(keywordIndex.getDocumentCount(repoA)).isEqualTo(1);
+		assertThat(keywordIndex.getLastModified(repoA)).isNotNull();
+	}
+
+	@Test
+	@DisplayName("listIndexedRepos returns empty list when index dir does not exist")
+	void listIndexedRepos_emptyBaseDir_returnsEmpty() {
+		GitContextProperties.KeywordProperties nonExistentProps = new GitContextProperties.KeywordProperties(
+				tempDir.resolve("does-not-exist"), 3.0, 1.5, 1.0
+		);
+		GitContextProperties props = new GitContextProperties(
+				null, tempDir.resolve("repos"), "http://localhost:6333",
+				null, null, null, null, null, null, nonExistentProps, null
+		);
+		KeywordIndex emptyIndex = new KeywordIndex(props, analyzer);
+		assertThat(emptyIndex.listIndexedRepos()).isEmpty();
+		assertThat(emptyIndex.getDocumentCount(repo)).isEqualTo(0);
+		assertThat(emptyIndex.getLastModified(repo)).isNull();
+	}
 }

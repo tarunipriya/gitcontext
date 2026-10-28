@@ -10,6 +10,7 @@ package io.github.tarunipriya.gitcontext.generation;
  * @param symbolName symbol identifier if available
  * @param url GitHub web URL if available
  * @param chunkId unique chunk identifier
+ * @param title item title if available (for commits, PRs, issues)
  */
 public record Citation(
 		int number,
@@ -18,6 +19,18 @@ public record Citation(
 		Integer endLine,
 		String symbolName,
 		String url,
-		String chunkId
+		String chunkId,
+		String title
 ) {
+	public Citation(
+			int number,
+			String path,
+			Integer startLine,
+			Integer endLine,
+			String symbolName,
+			String url,
+			String chunkId
+	) {
+		this(number, path, startLine, endLine, symbolName, url, chunkId, null);
+	}
 }
