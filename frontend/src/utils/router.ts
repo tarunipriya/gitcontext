@@ -1,5 +1,5 @@
 export interface RouteInfo {
-  route: 'ask' | 'repos';
+  route: 'ask' | 'repos' | 'styleguide';
   repo?: string;
 }
 
@@ -14,6 +14,9 @@ export function parseHash(hash: string): RouteInfo {
 
   if (path === 'repos') {
     return { route: 'repos', repo };
+  }
+  if (path === 'styleguide') {
+    return { route: 'styleguide', repo };
   }
   return { route: 'ask', repo };
 }

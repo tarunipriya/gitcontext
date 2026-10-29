@@ -54,8 +54,23 @@ describe('App Component and Hash Navigation', () => {
     expect(parseHash('#')).toEqual({ route: 'ask', repo: undefined });
     expect(parseHash('#/ask')).toEqual({ route: 'ask', repo: undefined });
     expect(parseHash('#/repos')).toEqual({ route: 'repos', repo: undefined });
+    expect(parseHash('#/styleguide')).toEqual({ route: 'styleguide', repo: undefined });
     expect(parseHash('#/ask?repo=owner/repo')).toEqual({ route: 'ask', repo: 'owner/repo' });
     expect(parseHash('#/repos?repo=owner/repo')).toEqual({ route: 'repos', repo: 'owner/repo' });
+  });
+
+  it('renders style guide page when hash is #/styleguide', async () => {
+    window.location.hash = '#/styleguide';
+    render(<App />);
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('heading', { name: /gitcontext design system & component library/i })
+        ).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
   });
 
   it('renders Ask page by default and marks Ask navigation tab with aria-current="page"', () => {

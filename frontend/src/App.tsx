@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { AskPage } from './components/AskPage';
 import { ReposPage } from './components/ReposPage';
+import { ThemeProvider } from './components/theme';
 import { parseHash, type RouteInfo } from './utils/router';
+
+const StyleGuidePage = lazy(() => import('./components/StyleGuidePage'));
 
 export const App: React.FC = () => {
   const [routeInfo, setRouteInfo] = useState<RouteInfo>(() => parseHash(window.location.hash));
@@ -19,14 +22,31 @@ export const App: React.FC = () => {
     window.location.hash = `#/ask?repo=${encodeURIComponent(repo)}`;
   };
 
+  let pageContent: React.ReactNode;
+  if (routeInfo.route === 'styleguide') {
+    pageContent = (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-background flex items-center justify-center p-8 text-muted-foreground font-mono text-sm">
+            Loading design system style guide...
+          </div>
+        }
+      >
+        <StyleGuidePage />
+      </Suspense>
+    );
+  } else if (routeInfo.route === 'repos') {
+    pageContent = <ReposPage onAskRepo={handleAskRepo} />;
+  } else {
+    pageContent = <AskPage initialRepo={routeInfo.repo} />;
+  }
+
   return (
-    <div className="app-root">
-      {routeInfo.route === 'repos' ? (
-        <ReposPage onAskRepo={handleAskRepo} />
-      ) : (
-        <AskPage initialRepo={routeInfo.repo} />
-      )}
-    </div>
+    <ThemeProvider>
+      <div className="app-root">
+        {pageContent}
+      </div>
+    </ThemeProvider>
   );
 };
 
