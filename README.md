@@ -70,6 +70,36 @@ docker compose up -d
 docker compose down
 ```
 
+## Run everything with Docker
+
+To run the complete GitContext stack (Qdrant vector store, Java 25 / Spring Boot backend, and React web frontend) with Docker Compose in Windows PowerShell:
+
+1. **Configure Environment:**
+   Copy `.env.example` to `.env` and fill in your keys:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+   Set `LLM_API_KEY` (for grounded answer generation) and optionally `GITHUB_TOKEN` (for pull request and incident issue ingestion).
+
+2. **Build and Run:**
+   ```powershell
+   docker compose --profile app up --build
+   ```
+
+3. **Access Services:**
+   - **Web UI:** [http://localhost:5173](http://localhost:5173)
+   - **Swagger UI (Interactive API Docs):** [http://localhost:8081/swagger-ui.html](http://localhost:8081/swagger-ui.html) (OpenAPI JSON spec at `http://localhost:8081/v3/api-docs`)
+   - **Qdrant Dashboard:** [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+
+4. **Stop Services:**
+   ```powershell
+   docker compose --profile app down
+   ```
+   Ingested repositories, Lucene keyword indices, and cached reranker model weights persist inside the `gitcontext_data` Docker volume. To stop and wipe all persisted data, use:
+   ```powershell
+   docker compose --profile app down -v
+   ```
+
 ## Incremental Re-indexing
 
 GitContext reuses embeddings of unchanged chunks during repository updates to drastically reduce re-indexing time (e.g. from ~150 s down to a few seconds):

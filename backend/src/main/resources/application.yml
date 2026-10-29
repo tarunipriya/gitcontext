@@ -12,6 +12,12 @@ springdotenv:
   directory: ..
   ignore-if-missing: true
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
 gitcontext:
   github-token: ${GITHUB_TOKEN:}
   repos-dir: ${REPOS_DIR:./data/repos}

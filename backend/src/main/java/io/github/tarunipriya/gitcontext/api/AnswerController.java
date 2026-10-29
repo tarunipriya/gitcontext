@@ -16,6 +16,8 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST controller providing grounded answer generation with verified citations against indexed repository knowledge.
  */
+@Tag(name = "Answer", description = "Grounded question answering with verified citations")
 @RestController
 public class AnswerController {
 
@@ -51,6 +54,7 @@ public class AnswerController {
 	 * @param request inquiry payload with question and search options
 	 * @return grounded answer response
 	 */
+	@Operation(summary = "Ask a question about an indexed repository")
 	@PostMapping("/api/repos/{owner}/{name}/ask")
 	public ResponseEntity<AskResponse> ask(
 			@PathVariable String owner,

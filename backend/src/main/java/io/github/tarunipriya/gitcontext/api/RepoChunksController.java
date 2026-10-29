@@ -15,6 +15,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST controller for inspecting ingested repository files, chunks, and individual chunk contents.
  */
+@Tag(name = "Repository Chunks", description = "Inspection of indexed repository files and chunks")
 @RestController
 public class RepoChunksController {
 
@@ -46,6 +49,7 @@ public class RepoChunksController {
 	 * @param name repository name
 	 * @return list of file summary items sorted by path
 	 */
+	@Operation(summary = "List distinct ingested files in a repository")
 	@GetMapping("/api/repos/{owner}/{name}/files")
 	public ResponseEntity<List<RepoFileItem>> getFiles(
 			@PathVariable String owner,
@@ -102,6 +106,7 @@ public class RepoChunksController {
 	 * @param offset starting index offset (default 0)
 	 * @return page of chunk items
 	 */
+	@Operation(summary = "List paginated chunks matching query filters")
 	@GetMapping("/api/repos/{owner}/{name}/chunks")
 	public ResponseEntity<PageResponse<ChunkItemResponse>> getChunks(
 			@PathVariable String owner,
@@ -175,6 +180,7 @@ public class RepoChunksController {
 	 * @param chunkId chunk identifier
 	 * @return chunk details with text and source content
 	 */
+	@Operation(summary = "Get details and content for a specific chunk")
 	@GetMapping("/api/repos/{owner}/{name}/chunks/{chunkId}")
 	public ResponseEntity<ChunkDetailResponse> getChunk(
 			@PathVariable String owner,

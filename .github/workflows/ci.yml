@@ -83,3 +83,22 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build, frontend]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        run: docker build -t gitcontext-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t gitcontext-frontend:ci ./frontend

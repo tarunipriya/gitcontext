@@ -17,6 +17,8 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST controller providing repository search across vector, keyword, and hybrid modes, and indexing status.
  */
+@Tag(name = "Search", description = "Vector, keyword, and hybrid repository search")
 @RestController
 public class SearchController {
 
@@ -72,6 +75,7 @@ public class SearchController {
 	 * @param excludeTests optional boolean to filter out test files and directories (default: false)
 	 * @return search response containing query, limits, mode, warnings, timings, and ranked hits
 	 */
+	@Operation(summary = "Search repository chunks using vector, keyword, or hybrid mode")
 	@GetMapping("/api/repos/{owner}/{name}/search")
 	public ResponseEntity<SearchResponse> search(
 			@PathVariable String owner,
@@ -166,6 +170,7 @@ public class SearchController {
 	 * @param name repository name
 	 * @return indexing status detailing points stored in Qdrant
 	 */
+	@Operation(summary = "Get indexing and storage status for a repository")
 	@GetMapping("/api/repos/{owner}/{name}/index-status")
 	public ResponseEntity<IndexStatusResponse> getIndexStatus(
 			@PathVariable String owner,
