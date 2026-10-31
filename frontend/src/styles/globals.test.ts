@@ -8,6 +8,6 @@ describe('globals.css cascade layer order', () => {
     const content = fs.readFileSync(globalsPath, 'utf8').trimStart();
     const firstLine = content.split('\n')[0].trim();
 
-    expect(firstLine).toBe('@layer theme, base, legacy, components, utilities;');
+    expect(firstLine).toBe('@layer theme, base, components, utilities;');
   });
 });

@@ -23,6 +23,13 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
   });
 }
 
+if (typeof window !== 'undefined' && window.HTMLElement) {
+  window.HTMLElement.prototype.scrollIntoView = window.HTMLElement.prototype.scrollIntoView || (() => {});
+  window.HTMLElement.prototype.hasPointerCapture = window.HTMLElement.prototype.hasPointerCapture || (() => false);
+  window.HTMLElement.prototype.setPointerCapture = window.HTMLElement.prototype.setPointerCapture || (() => {});
+  window.HTMLElement.prototype.releasePointerCapture = window.HTMLElement.prototype.releasePointerCapture || (() => {});
+}
+
 afterEach(() => {
   cleanup();
 });

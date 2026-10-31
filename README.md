@@ -161,13 +161,36 @@ $response.citations | Format-Table number, path, startLine, endLine, url
 
 ## Web UI
 
-GitContext includes a React + TypeScript web frontend in `frontend/` with two core views switched by accessible URL hash navigation (`#/ask` and `#/repos`):
+GitContext features a Claude-style conversational interface built with React 18, TypeScript, Tailwind CSS v4, and shadcn/ui primitives. It provides an app shell with collapsible navigation, multi-turn follow-ups, and inline source inspection:
 
-- **Ask Page (`#/ask`)**: Grounded natural-language repository question answering with rich markdown rendering, inline verified citations linking to GitHub lines, retrieved sources inspector with readable titles for code files, commits (`commit <sha> — <message>`), PRs (`PR #<number> — <title>`), and issues, plus latency telemetry (retrieval, generation, tokens).
+- **App Shell & Sidebar**:
+  - Left sidebar (expandable `w-64`, collapsible to `w-16` icon view; automatically switches to an accessible `Sheet` drawer on mobile screens `<768px`).
+  - Top header with GitContext's commit-trunk brand logo and a "New chat" shortcut button.
+  - Chronological chat history automatically grouped into **Today**, **Yesterday**, **Previous 7 days**, and **Older** buckets, with context menus to rename or delete conversations.
+  - Persistent bottom toolbar with **Repositories** navigation, dev-only **Style guide** link (`#/styleguide`), `ThemeToggle` (light/dark mode), and a sidebar collapse toggle.
+- **Start Screen (`#/`)**:
+  - Clean, vertically centered layout with the GitContext brand mark and query prompt (*"What do you want to know about this repo?"*).
+  - Four curated question chips to quickly query project structure, architecture, chunking, or dependencies with a single click.
+  - Contextual empty state linking to `#/repos` if no repositories are indexed yet.
+- **Interactive Composer**:
+  - Rounded card with auto-growing textarea (up to 8 lines) and full keyboard shortcuts (`Enter` to submit, `Shift+Enter` for newline).
+  - Repository switcher select picker embedded directly inside the composer's bottom-left corner.
+  - Real-time **Stop** button powered by `AbortController` to cancel in-flight queries.
+- **Conversation & Citations (`#/c/<chatId>`)**:
+  - User messages displayed in compact muted bubbles; assistant messages rendered as clean prose with GitContext avatar.
+  - Safe markdown rendering with no raw HTML (XSS-safe) and code blocks highlighted with `CodeBlock` (line numbers, language badge, clipboard copy).
+  - Verified citation markers rendered as clickable accent chips (`[1]`, `[2]`).
+  - Source cards row underneath each answer linking directly to cited code files, commit diffs, PR discussions, and issues.
+  - Slide-over **Source Panel (Sheet)** on the right displaying the highlighted code snippet, line numbers, chunk symbols, and safe external GitHub links.
+  - Fast typewriter reveal effect (~2–3 ms/char) respecting `prefers-reduced-motion`, plus inline ProblemDetail error handling with a one-click Retry button.
+  - Latency telemetry metadata (`model · retrieval ms · generation ms`).
 - **Repositories Page (`#/repos`)**:
-  - Ingest GitHub repositories by entering `owner/name` or full URL.
-  - Live progress monitoring for active ingestion jobs (`QUEUED`, `RUNNING`) with automatic 2-second polling, elapsed duration timer, and error display for failed jobs.
-  - Browse indexed repositories with chunk and file counts, relative indexing timestamps, commit SHAs, and a direct "Ask" button that opens `#/ask` with the selected repository pre-filled.
+  - Settings-style dashboard inside the app shell.
+  - Form to ingest GitHub repositories with client-side owner/name format validation.
+  - Active ingestion job tracker with single-interval polling (2 seconds) and live duration timers.
+  - Indexed repository cards showing total chunks, files, commit SHAs, and a **New chat** button to immediately launch conversations for that repository.
+- **Local Persistence**:
+  - Conversations, messages, sources, and selected repositories automatically persist in `localStorage` (`gitcontext-chats`), safely capped at 50 conversations.
 
 ### Running on Windows
 

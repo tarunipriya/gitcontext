@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
+  FolderGit2,
+  Plus,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  FileCode,
+  Layers,
+  Calendar,
+  AlertCircle,
+  GitBranch,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
   submitIngestion,
   getJob,
   getRecentJobs,
@@ -9,9 +23,13 @@ import {
   type RepoSummaryResponse,
   type ProblemDetail,
 } from '../api/client';
-import { parseRepoRef, isValidRepoRef, formatElapsedTime, formatRelativeTime } from '../utils/formatters';
-import { AppHeader } from './AppHeader';
-import './ReposPage.css';
+import {
+  parseRepoRef,
+  isValidRepoRef,
+  formatElapsedTime,
+  formatRelativeTime,
+} from '../utils/formatters';
+import { cn } from '@/lib/utils';
 
 export interface ReposPageProps {
   onAskRepo?: (repo: string) => void;
@@ -35,7 +53,6 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
 
   const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
 
-  // Store in-flight AbortControllers so they can be aborted on unmount
   const inFlightControllersRef = useRef<Set<AbortController>>(new Set());
 
   const registerController = useCallback((controller: AbortController) => {
@@ -57,7 +74,13 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
     } catch (err: unknown) {
       if (signal?.aborted) return;
       if (err instanceof ApiError) {
-        setReposError(err.problemDetail || { title: err.title || 'Error', detail: err.detail || err.message, status: err.status });
+        setReposError(
+          err.problemDetail || {
+            title: err.title || 'Error',
+            detail: err.detail || err.message,
+            status: err.status,
+          }
+        );
       } else if (err instanceof Error) {
         setReposError({ title: 'Failed to load repositories', detail: err.message });
       }
@@ -105,7 +128,6 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
 
   // Polling logic for active jobs:
   // Reads jobsRef.current; does not depend on `jobs` state.
-  // Only updates state for jobs whose displayed fields actually changed.
   const pollActiveJobs = useCallback(async () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
       return;
@@ -184,7 +206,7 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
     }
   }, [registerController, unregisterController, loadRepos]);
 
-  // One polling effect that depends ONLY on hasActiveJob
+  // Polling effect: depends ONLY on hasActiveJob
   useEffect(() => {
     if (!hasActiveJob) {
       return;
@@ -225,7 +247,6 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
       return;
     }
 
-    // Client-side validation using the same pattern as backend RepoRef
     if (!isValidRepoRef(trimmed)) {
       setSubmitError({
         title: 'Invalid Repository',
@@ -258,11 +279,13 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
       if (err instanceof ApiError) {
-        setSubmitError(err.problemDetail || {
-          title: err.title || `Request failed (${err.status})`,
-          detail: err.detail || err.message,
-          status: err.status,
-        });
+        setSubmitError(
+          err.problemDetail || {
+            title: err.title || `Request failed (${err.status})`,
+            detail: err.detail || err.message,
+            status: err.status,
+          }
+        );
       } else if (err instanceof Error) {
         setSubmitError({
           title: 'Ingestion Request Failed',
@@ -275,40 +298,45 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
     }
   };
 
-  const handleAskRepo = (repoName: string) => {
+  const handleAskRepoClick = (repoName: string) => {
     if (onAskRepo) {
       onAskRepo(repoName);
     } else {
-      window.location.hash = `#/ask?repo=${encodeURIComponent(repoName)}`;
+      window.location.hash = `#/?repo=${encodeURIComponent(repoName)}`;
     }
   };
 
   return (
-    <div className="ask-container repos-container">
-      <AppHeader currentTab="repos" />
+    <div className="flex-1 overflow-y-auto px-4 py-8 bg-background">
+      <main className="max-w-4xl w-full mx-auto space-y-8" aria-label="Repositories management">
+        {/* Settings header */}
+        <div className="border-b border-border/60 pb-5">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Repositories</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage connected GitHub repositories, view indexing jobs, and launch targeted conversations.
+          </p>
+        </div>
 
-      <main className="ask-main">
-        {/* Ingestion Submission Form */}
-        <section className="ingest-card" aria-labelledby="ingest-heading">
-          <div className="section-header">
-            <div>
-              <h2 id="ingest-heading" className="section-title">Ingest Repository</h2>
-              <p className="section-subtitle">
-                Index any GitHub repository for hybrid retrieval, chunking, and grounded question answering.
-              </p>
-            </div>
+        {/* Ingest Repository Form Card */}
+        <section className="rounded-2xl border border-border bg-card p-6 shadow-xs space-y-4" aria-labelledby="ingest-heading">
+          <div>
+            <h2 id="ingest-heading" className="text-base font-semibold text-foreground">
+              Ingest Repository
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Index any GitHub repository for hybrid retrieval, chunking, and grounded question answering.
+            </p>
           </div>
 
-          <form className="ingest-form" onSubmit={handleSubmit} noValidate>
-            <div className="form-group">
-              <label htmlFor="repo-ingest-input" className="form-label">
+          <form onSubmit={handleSubmit} noValidate className="space-y-3">
+            <div>
+              <label htmlFor="repo-ingest-input" className="block text-xs font-medium text-foreground mb-1.5">
                 GitHub Repository
               </label>
-              <div className="input-with-button">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   id="repo-ingest-input"
                   type="text"
-                  className="form-input"
                   value={repoInput}
                   onChange={(e) => {
                     setRepoInput(e.target.value);
@@ -319,49 +347,50 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
                   autoComplete="off"
                   spellCheck="false"
                   required
+                  className="flex-1 rounded-xl border border-input bg-background px-3.5 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all"
                 />
-                <button
+                <Button
                   id="ingest-button"
                   type="submit"
-                  className="ask-button ingest-submit-button"
                   disabled={submitting || repoInput.trim().length === 0}
+                  className="rounded-xl px-5 text-xs font-medium gap-1.5 h-10 shrink-0"
                 >
                   {submitting ? (
                     <>
-                      <span className="spinner" aria-hidden="true" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Submitting...</span>
                     </>
                   ) : (
                     <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="16 16 12 12 8 16" />
-                        <line x1="12" y1="12" x2="12" y2="21" />
-                        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
-                      </svg>
+                      <Plus className="h-4 w-4" />
                       <span>Ingest</span>
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
 
             {submitError && (
-              <div className="error-banner" role="alert" data-testid="ingest-error-banner">
-                <div className="error-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                </div>
-                <div className="error-content">
-                  <div className="error-header-line">
-                    <strong className="error-title">{submitError.title || 'Error'}</strong>
+              <div
+                className="rounded-xl border border-destructive/40 bg-destructive/10 p-3.5 flex items-start gap-2.5 text-xs"
+                role="alert"
+                data-testid="ingest-error-banner"
+              >
+                <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <strong className="text-destructive font-medium">
+                      {submitError.title || 'Error'}
+                    </strong>
                     {submitError.status && (
-                      <span className="error-status-badge">HTTP {submitError.status}</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-destructive/20 text-destructive">
+                        HTTP {submitError.status}
+                      </span>
                     )}
                   </div>
-                  {submitError.detail && <p className="error-detail">{submitError.detail}</p>}
+                  {submitError.detail && (
+                    <p className="text-muted-foreground leading-relaxed">{submitError.detail}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -370,46 +399,66 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
 
         {/* Active & Recent Ingestion Jobs */}
         {jobs.length > 0 && (
-          <section className="jobs-section" aria-labelledby="jobs-heading">
-            <div className="section-header">
-              <h2 id="jobs-heading" className="section-title">
-                Ingestion Jobs ({jobs.length})
-              </h2>
-            </div>
+          <section className="space-y-3" aria-labelledby="jobs-heading">
+            <h2 id="jobs-heading" className="text-sm font-semibold text-foreground uppercase tracking-wider">
+              Ingestion Jobs ({jobs.length})
+            </h2>
 
-            <div className="jobs-list" role="list">
+            <div className="space-y-2.5" role="list">
               {jobs.map((job) => {
                 const elapsed = formatElapsedTime(
                   job.startedAt || job.submittedAt,
                   job.finishedAt,
                   currentTime
                 );
+
+                const isRunning = job.status === 'RUNNING';
+                const isCompleted = job.status === 'COMPLETED';
+                const isFailed = job.status === 'FAILED';
+                const isQueued = job.status === 'QUEUED';
+
                 return (
-                  <article key={job.jobId} className={`job-card job-status-${job.status.toLowerCase()}`} role="listitem">
-                    <div className="job-card-header">
-                      <div className="job-repo-info">
-                        <span className="job-repo-name">{job.repo}</span>
-                        <span className="job-elapsed-time" title="Elapsed duration">
-                          ⏱ {elapsed}
+                  <article
+                    key={job.jobId}
+                    role="listitem"
+                    className="rounded-xl border border-border/80 bg-card p-4 shadow-2xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <FolderGit2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="font-mono text-sm font-semibold text-foreground truncate">
+                          {job.repo}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>⏱ {elapsed}</span>
                         </span>
                       </div>
-                      <span className={`status-badge status-${job.status.toLowerCase()}`}>
-                        {job.status === 'RUNNING' && <span className="status-spinner" aria-hidden="true" />}
-                        {job.status === 'COMPLETED' && <span className="status-icon" aria-hidden="true">✓</span>}
-                        {job.status === 'FAILED' && <span className="status-icon" aria-hidden="true">✕</span>}
-                        {job.status === 'QUEUED' && <span className="status-icon" aria-hidden="true">⏳</span>}
+
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium',
+                          isRunning && 'bg-primary/10 text-primary border border-primary/20',
+                          isCompleted && 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20',
+                          isFailed && 'bg-destructive/10 text-destructive border border-destructive/20',
+                          isQueued && 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                        )}
+                      >
+                        {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {isCompleted && <CheckCircle2 className="h-3 w-3" />}
+                        {isFailed && <XCircle className="h-3 w-3" />}
                         <span>{job.status}</span>
                       </span>
                     </div>
 
-                    {job.status === 'FAILED' && job.errorMessage && (
-                      <div className="job-error-message" role="alert">
+                    {isFailed && job.errorMessage && (
+                      <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg" role="alert">
                         <strong>Failure:</strong> {job.errorMessage}
                       </div>
                     )}
 
-                    {job.status === 'COMPLETED' && job.summary && (
-                      <div className="job-summary-message">
+                    {isCompleted && job.summary && (
+                      <div className="text-xs text-muted-foreground bg-muted/40 p-2.5 rounded-lg font-mono">
                         {job.summary}
                       </div>
                     )}
@@ -421,84 +470,88 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
         )}
 
         {/* Indexed Repositories List */}
-        <section className="indexed-repos-section" aria-labelledby="indexed-repos-heading">
-          <div className="section-header">
-            <div>
-              <h2 id="indexed-repos-heading" className="section-title">
-                Indexed Repositories
-              </h2>
-              <p className="section-subtitle">
-                Repositories ready for natural language grounded question answering.
-              </p>
-            </div>
+        <section className="space-y-4" aria-labelledby="indexed-repos-heading">
+          <div>
+            <h2 id="indexed-repos-heading" className="text-base font-semibold text-foreground">
+              Indexed Repositories
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Repositories ready for natural language grounded question answering.
+            </p>
           </div>
 
           {reposLoading && (
-            <div className="repos-grid" data-testid="repos-loading-skeleton">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="repo-card repo-card-skeleton shimmer" aria-hidden="true" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="repos-loading-skeleton">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-36 rounded-2xl border border-border bg-card/50 animate-pulse" />
               ))}
             </div>
           )}
 
           {!reposLoading && reposError && (
-            <div className="error-banner" role="alert">
-              <div className="error-content">
-                <strong className="error-title">{reposError.title || 'Error Loading Repositories'}</strong>
-                {reposError.detail && <p className="error-detail">{reposError.detail}</p>}
-              </div>
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-xs" role="alert">
+              <strong className="text-destructive font-semibold">
+                {reposError.title || 'Error Loading Repositories'}
+              </strong>
+              {reposError.detail && <p className="text-muted-foreground mt-1">{reposError.detail}</p>}
             </div>
           )}
 
           {!reposLoading && !reposError && repos.length === 0 && (
-            <div className="empty-state" data-testid="repos-empty-state">
-              <div className="empty-state-icon" aria-hidden="true">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  <line x1="12" y1="11" x2="12" y2="17" />
-                  <line x1="9" y1="14" x2="15" y2="14" />
-                </svg>
+            <div
+              className="rounded-2xl border border-dashed border-border p-8 text-center space-y-3"
+              data-testid="repos-empty-state"
+            >
+              <FolderGit2 className="h-8 w-8 text-muted-foreground/60 mx-auto" />
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">No repositories indexed yet</h3>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                  Enter a GitHub repository name above to ingest code files, PRs, and commits into the search index.
+                </p>
               </div>
-              <h3 className="empty-state-title">No repositories indexed yet</h3>
-              <p className="empty-state-desc">
-                Enter a GitHub repository name above to ingest code files, PRs, and commits into the search index.
-              </p>
             </div>
           )}
 
           {!reposLoading && !reposError && repos.length > 0 && (
-            <div className="repos-grid" data-testid="repos-grid">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="repos-grid">
               {repos.map((repoItem) => {
                 const codeCount = repoItem.countsBySourceType?.CODE;
                 return (
-                  <article key={repoItem.repo} className="repo-card" data-testid={`repo-card-${repoItem.repo}`}>
-                    <div className="repo-card-body">
-                      <div className="repo-card-top">
-                        <span className="repo-card-icon" aria-hidden="true">
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                          </svg>
-                        </span>
-                        <h3 className="repo-card-title">{repoItem.repo}</h3>
+                  <article
+                    key={repoItem.repo}
+                    className="rounded-2xl border border-border bg-card p-5 shadow-2xs flex flex-col justify-between space-y-4"
+                    data-testid={`repo-card-${repoItem.repo}`}
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FolderGit2 className="h-4 w-4 text-primary shrink-0" />
+                        <h3 className="text-sm font-bold text-foreground truncate font-mono">
+                          {repoItem.repo}
+                        </h3>
                       </div>
 
-                      <div className="repo-card-stats">
-                        <span className="repo-stat-badge">
-                          <strong>{repoItem.totalChunks}</strong> chunk{repoItem.totalChunks === 1 ? '' : 's'}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                          <Layers className="h-3 w-3" />
+                          <span>{repoItem.totalChunks}</span> chunks
                         </span>
                         {typeof codeCount === 'number' && (
-                          <span className="repo-stat-badge">
-                            <strong>{codeCount}</strong> file{codeCount === 1 ? '' : 's'}
+                          <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                            <FileCode className="h-3 w-3" />
+                            <span>{codeCount}</span> files
                           </span>
                         )}
                       </div>
 
                       {repoItem.ingestedAt && (
-                        <div className="repo-card-meta">
-                          <span>Indexed {formatRelativeTime(repoItem.ingestedAt)}</span>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground pt-1 flex-wrap font-mono">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            <span>Indexed {formatRelativeTime(repoItem.ingestedAt)}</span>
+                          </span>
                           {repoItem.headCommitSha && (
-                            <span className="repo-sha" title={repoItem.headCommitSha}>
+                            <span className="flex items-center gap-1 text-foreground/80">
+                              <GitBranch className="h-3 w-3" />
                               <code>{repoItem.headCommitSha.slice(0, 7)}</code>
                             </span>
                           )}
@@ -506,21 +559,18 @@ export const ReposPage: React.FC<ReposPageProps> = ({ onAskRepo }) => {
                       )}
                     </div>
 
-                    <div className="repo-card-footer">
-                      <button
+                    <div className="pt-2 border-t border-border/40 flex justify-end">
+                      <Button
                         type="button"
-                        className="ask-repo-btn"
-                        onClick={() => handleAskRepo(repoItem.repo)}
+                        size="sm"
+                        onClick={() => handleAskRepoClick(repoItem.repo)}
                         data-testid={`ask-repo-${repoItem.repo}`}
-                        title={`Ask questions about ${repoItem.repo}`}
+                        title={`New chat about ${repoItem.repo}`}
+                        className="rounded-xl px-3.5 h-8 text-xs gap-1.5 font-medium"
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <circle cx="12" cy="12" r="10" />
-                          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                          <line x1="12" y1="17" x2="12.01" y2="17" />
-                        </svg>
-                        <span>Ask</span>
-                      </button>
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>New chat</span>
+                      </Button>
                     </div>
                   </article>
                 );

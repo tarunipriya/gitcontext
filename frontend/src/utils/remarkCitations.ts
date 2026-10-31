@@ -29,9 +29,7 @@ export function remarkCitations(options: RemarkCitationsOptions) {
     for (const s of options.sources) {
       if (s && typeof s.number === 'number') {
         const safe = safeHttpUrl(s.url);
-        if (safe) {
-          sourceMap.set(s.number, safe);
-        }
+        sourceMap.set(s.number, safe || `#source-${s.number}`);
       }
     }
   }
