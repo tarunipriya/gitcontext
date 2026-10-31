@@ -188,3 +188,13 @@ export function formatRelativeTime(isoString?: string | null): string {
     year: 'numeric',
   });
 }
+
+/**
+ * Formats startLine and endLine into "L10" or "L10-25", or null if not specified.
+ */
+export function formatLineRange(start?: number | null, end?: number | null): string | null {
+  if (start == null) return null;
+  if (end == null || end === start) return `L${start}`;
+  return `L${start}-${end}`;
+}
+
